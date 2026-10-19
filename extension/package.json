@@ -1,0 +1,196 @@
+{
+  "name": "agent-orchestrator",
+  "displayName": "Orquestrador de Agentes",
+  "description": "Interface para o orchestrator.py: agy supervisiona, codex implementa e claude revisa, com acompanhamento em tempo real.",
+  "version": "0.2.0",
+  "publisher": "jhordan",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentOrchestrator",
+          "title": "Orquestrador",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "agentOrchestrator": [
+        {
+          "type": "webview",
+          "id": "agentOrchestrator.panel",
+          "name": "Orquestrador de Agentes"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "agentOrchestrator.run",
+        "title": "Orquestrador: Executar tarefa…"
+      },
+      {
+        "command": "agentOrchestrator.stop",
+        "title": "Orquestrador: Parar execução"
+      },
+      {
+        "command": "agentOrchestrator.showLog",
+        "title": "Orquestrador: Mostrar log bruto"
+      },
+      {
+        "command": "agentOrchestrator.doctor",
+        "title": "Orquestrador: Diagnóstico do ambiente"
+      }
+    ],
+    "configuration": {
+      "title": "Orquestrador de Agentes",
+      "properties": {
+        "agentOrchestrator.pythonPath": {
+          "type": "string",
+          "default": "python3",
+          "description": "Interpretador Python usado para rodar o orchestrator.py."
+        },
+        "agentOrchestrator.scriptPath": {
+          "type": "string",
+          "default": "~/tools/agent-orchestrator/orchestrator.py",
+          "description": "Caminho do orchestrator.py (aceita ~)."
+        },
+        "agentOrchestrator.configPath": {
+          "type": "string",
+          "default": "",
+          "description": "orchestrator.json alternativo (vazio = o que fica ao lado do script)."
+        },
+        "agentOrchestrator.backend": {
+          "type": "string",
+          "enum": [
+            "direct",
+            "mco"
+          ],
+          "default": "direct",
+          "description": "direct = chama agy/codex/claude diretamente; mco = usa o wrapper mco."
+        },
+        "agentOrchestrator.maxLoops": {
+          "type": "number",
+          "default": 6,
+          "minimum": 1,
+          "description": "Limite de ciclos supervisor → agente."
+        },
+        "agentOrchestrator.isolation": {
+          "type": "string",
+          "enum": [
+            "",
+            "worktree",
+            "none"
+          ],
+          "enumDescriptions": [
+            "Usar o do .orchestrator.json / orchestrator.json",
+            "Agentes numa branch e worktree isoladas",
+            "Agentes direto na pasta aberta"
+          ],
+          "default": "",
+          "description": "Onde os agentes trabalham."
+        },
+        "agentOrchestrator.checks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Comandos que precisam passar antes da revisão do claude (ex.: \"pnpm test\")."
+        },
+        "agentOrchestrator.approve": {
+          "type": "string",
+          "enum": [
+            "none",
+            "first",
+            "all"
+          ],
+          "enumDescriptions": [
+            "Sem pausas",
+            "Aprovar só o primeiro passo (o plano inicial)",
+            "Aprovar cada passo antes de o agente rodar"
+          ],
+          "default": "none",
+          "description": "Pausar para você aprovar ou editar o passo antes de o agente rodar."
+        },
+        "agentOrchestrator.templates": {
+          "type": "array",
+          "description": "Modelos de tarefa exibidos no painel.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "task": {
+                "type": "string"
+              },
+              "maxLoops": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "name",
+              "task"
+            ]
+          },
+          "default": [
+            {
+              "name": "Feature com teste",
+              "task": "Implementar <descreva a feature>.\nPronto quando: existe teste cobrindo o caso principal e as verificações passam.",
+              "maxLoops": 6
+            },
+            {
+              "name": "Corrigir bug",
+              "task": "Corrigir o bug: <sintoma e como reproduzir>.\nPronto quando: existe um teste que falhava antes da correção e passa agora.",
+              "maxLoops": 5
+            },
+            {
+              "name": "Corrigir testes que falham",
+              "task": "Rodar a suíte de testes, identificar os que falham e corrigir a causa no código (não o teste), sem mudar o comportamento esperado.",
+              "maxLoops": 4
+            },
+            {
+              "name": "Refatoração mecânica",
+              "task": "Refatorar <alvo> para <objetivo> sem mudar comportamento.\nPronto quando: tipos, lint e testes passam.",
+              "maxLoops": 4
+            },
+            {
+              "name": "Revisar o último commit",
+              "task": "Revisar as alterações do último commit em busca de bugs, falhas de segurança e casos de borda, e corrigir o que for encontrado.",
+              "maxLoops": 3
+            }
+          ]
+        },
+        "agentOrchestrator.systemNotifications": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notificação do sistema (notify-send) quando uma execução termina ou espera aprovação com o editor sem foco."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "package": "vsce package --allow-missing-repository --skip-license",
+    "dev": "tsc -watch -p .",
+    "dev:link": "bash scripts/dev-link.sh",
+    "release": "bash scripts/release.sh"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "~1.90.0",
+    "@vscode/vsce": "^3.2.0",
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,0 +1,8 @@
+# Python
+__pycache__/
+*.pyc
+
+# Extensão: dependências, build e pacotes (gerados por npm install / tsc / vsce)
+extension/node_modules/
+extension/out/
+extension/*.vsix

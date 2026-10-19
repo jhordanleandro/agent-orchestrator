@@ -1,0 +1,146 @@
+{
+  "_comentario": "Placeholders aceitos nos comandos: {prompt}, {prompt_file}, {prompt_dir}, {repo}, {last_message_file}, {timeout}. Ajuste as flags aqui se uma CLI mudar — o orchestrator.py não tem nenhuma flag fixa no código.",
+  "max_loops": 6,
+  "backend": "direct",
+  "isolation": "worktree",
+  "timeouts": {
+    "supervisor": 300,
+    "agy": 900,
+    "codex": 900,
+    "claude": 900,
+    "check": 600
+  },
+  "history": {
+    "step_output_chars": 6000,
+    "budget_chars": 60000,
+    "worker_context_chars": 3000
+  },
+  "arg_prompt_limit_chars": 60000,
+  "claude_policy": {
+    "max_calls_per_run": 2,
+    "min_codex_attempts_before_diagnosis": 2,
+    "max_weekly_utilization": 0.9,
+    "max_five_hour_utilization": 0.95
+  },
+  "quality_gate": {
+    "require_git_changes": true,
+    "commands": []
+  },
+  "supervisor": {
+    "agent": "agy",
+    "system_prompt": "Você é o SUPERVISOR de uma equipe de agentes de código. Você NÃO escreve código: lê a tarefa e o histórico e decide o próximo passo.\n\nAgentes disponíveis:\n- agy: arquitetura inicial, exploração do repositório, frontend (React/Next.js, CSS, componentes). Cota alta.\n- codex: backend, lógica de negócio, APIs, banco, testes unitários, correção de testes que falham. Cota média.\n- claude: SOMENTE revisão final de código (claude_purpose=\"review\") ou diagnóstico de bug que codex já tentou e não resolveu (claude_purpose=\"diagnosis\"). Cota escassa. NUNCA use claude para gerar código novo, boilerplate ou planejamento.\n- DONE: a tarefa está concluída (ou não há como avançar).\n\nRegras:\n1. Cada passo deve ter um objetivo pequeno e verificável.\n2. O campo prompt deve ser autocontido: o agente NÃO vê o histórico, só o que você escrever ali (arquivos, decisões tomadas, erros exatos).\n3. Se o último passo falhou, mande o erro exato para quem deve corrigir.\n4. Peça a revisão do claude uma única vez, no fim, quando o código já estiver pronto e testado.\n5. Depois de uma revisão do claude com apontamentos, mande as correções para codex (backend) ou agy (frontend) e encerre com DONE.\n\nIMPORTANTE: você roda em modo não interativo e NÃO pode executar comandos de terminal (qualquer comando é negado e sua resposta se perde). Use apenas leitura de arquivos.\n\nResponda APENAS com um objeto JSON, sem texto antes ou depois:\n{\"next_agent\": \"agy|codex|claude|DONE\", \"reason\": \"por que este agente agora (1 frase)\", \"claude_purpose\": \"review|diagnosis|null\", \"prompt\": \"instrução completa para o agente (vazio se DONE)\", \"summary\": \"se DONE: resumo do que foi feito e do que ficou pendente\"}",
+    "direct": {
+      "cmd": [
+        "agy",
+        "--mode",
+        "plan",
+        "--output-format",
+        "stream-json",
+        "--add-dir",
+        "{prompt_dir}",
+        "-p",
+        "{prompt}"
+      ],
+      "prompt_via": "arg",
+      "stream_format": "agy-stream"
+    },
+    "mco": {
+      "provider": "agy",
+      "execution_mode": "read_only"
+    }
+  },
+  "agents": {
+    "agy": {
+      "role": "Você é o agente de ARQUITETURA e FRONTEND (React/Next.js). Implemente diretamente nos arquivos do repositório. Siga o estilo do código existente. Ao terminar, liste os arquivos alterados e o que falta, se faltar algo. Você NÃO pode executar comandos de terminal (são negados em modo não interativo e sua resposta se perde): apenas leia e edite arquivos. As verificações (tipos, lint, testes) são rodadas pelo orquestrador depois.",
+      "direct": {
+        "cmd": [
+          "agy",
+          "--mode",
+          "accept-edits",
+          "--output-format",
+          "stream-json",
+          "--add-dir",
+          "{prompt_dir}",
+          "-p",
+          "{prompt}"
+        ],
+        "prompt_via": "arg",
+        "stream_format": "agy-stream"
+      },
+      "mco": {
+        "provider": "agy",
+        "execution_mode": "write"
+      }
+    },
+    "codex": {
+      "role": "Você é o agente de BACKEND: lógica de negócio, APIs, banco e testes unitários. Implemente diretamente nos arquivos do repositório e rode os testes relevantes. Ao terminar, liste os arquivos alterados e o resultado dos testes.",
+      "direct": {
+        "cmd": [
+          "codex",
+          "exec",
+          "--json",
+          "--skip-git-repo-check",
+          "-s",
+          "workspace-write",
+          "-C",
+          "{repo}",
+          "-o",
+          "{last_message_file}",
+          "-"
+        ],
+        "prompt_via": "stdin",
+        "stream_format": "codex-json",
+        "output_file": "{last_message_file}"
+      },
+      "mco": {
+        "provider": "codex",
+        "execution_mode": "write"
+      }
+    },
+    "claude": {
+      "role": "Você é o REVISOR SÊNIOR. Não altere arquivos. Revise o diff atual (git diff / git status) procurando bugs, falhas de segurança e casos de borda. Responda com uma lista objetiva de apontamentos, cada um com arquivo:linha, gravidade (alta/média/baixa) e correção sugerida. Se não houver problemas, diga APROVADO.",
+      "direct": {
+        "cmd": [
+          "claude",
+          "-p",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+          "--allowedTools",
+          "Read,Grep,Glob,Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(git show:*)"
+        ],
+        "prompt_via": "stdin",
+        "stream_format": "claude-stream"
+      },
+      "mco": {
+        "provider": "claude",
+        "execution_mode": "read_only"
+      }
+    }
+  },
+  "supervisor_fallback": {
+    "agent": "codex",
+    "direct": {
+      "cmd": [
+        "codex",
+        "exec",
+        "--json",
+        "--skip-git-repo-check",
+        "-s",
+        "read-only",
+        "-C",
+        "{repo}",
+        "-o",
+        "{last_message_file}",
+        "-"
+      ],
+      "prompt_via": "stdin",
+      "stream_format": "codex-json",
+      "output_file": "{last_message_file}"
+    },
+    "mco": {
+      "provider": "codex",
+      "execution_mode": "read_only"
+    }
+  }
+}

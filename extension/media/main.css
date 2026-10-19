@@ -1,0 +1,211 @@
+/* Usa as variáveis de tema do editor: o painel acompanha tema claro/escuro. */
+:root {
+  --agy: #4c8bf5;
+  --codex: #2fb57a;
+  --claude: #c06adf;
+  --supervisor: #1fb5c9;
+  --ok: var(--vscode-testing-iconPassed, #2fb57a);
+  --fail: var(--vscode-testing-iconFailed, #e5534b);
+  --warn: var(--vscode-editorWarning-foreground, #d29922);
+  --border: var(--vscode-panel-border, rgba(128, 128, 128, 0.3));
+  --muted: var(--vscode-descriptionForeground, #888);
+}
+
+body {
+  padding: 0 10px 24px;
+  color: var(--vscode-foreground);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  line-height: 1.45;
+}
+
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+.small { font-size: 0.9em; }
+code { font-family: var(--vscode-editor-font-family); font-size: 0.92em; }
+
+/* ── formulário ── */
+.form { display: flex; flex-direction: column; gap: 8px; padding: 10px 0 12px; border-bottom: 1px solid var(--border); }
+label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9em; color: var(--muted); flex: 1; }
+textarea, input, select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--border));
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: inherit;
+}
+textarea { resize: vertical; }
+textarea:focus, input:focus, select:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.checks { margin-top: 6px; }
+.hint { font-size: 0.85em; color: var(--muted); }
+
+button {
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+}
+button:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground); }
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+button.primary:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
+button.danger:not(:disabled) { color: #fff; background: var(--fail); }
+button.ghost { background: transparent; border-color: var(--border); color: var(--vscode-foreground); }
+
+/* ── status ── */
+.status-line { display: flex; align-items: center; gap: 4px; padding: 10px 0 4px; min-height: 22px; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.85em; border: 1px solid var(--border); }
+.pill.running { color: var(--supervisor); border-color: var(--supervisor); }
+.pill.ok { color: var(--ok); border-color: var(--ok); }
+.pill.fail { color: var(--fail); border-color: var(--fail); }
+.pill.tiny { font-size: 0.75em; padding: 0 6px; }
+
+.history-banner {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
+  margin: 6px 0; padding: 6px 8px; border-radius: 4px;
+  background: var(--vscode-editorInfo-background, rgba(76, 139, 245, 0.12));
+  font-size: 0.9em;
+}
+
+/* ── linha do tempo ── */
+.timeline { display: flex; flex-direction: column; gap: 10px; padding: 6px 0; }
+.cycle {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--supervisor);
+  border-radius: 6px;
+  background: var(--vscode-editor-background);
+}
+.cycle-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin-bottom: 4px; }
+.decision, .gate, .agent { margin-top: 6px; }
+.decision-line, .agent-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.gate-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 2px 0; }
+.gate-row details { width: 100%; }
+.agent { padding-top: 6px; border-top: 1px dashed var(--border); }
+.warn { color: var(--warn); margin: 3px 0; }
+.error { color: var(--fail); padding: 6px 0; }
+.ok { color: var(--ok); }
+.fail { color: var(--fail); }
+.timer { font-variant-numeric: tabular-nums; color: var(--muted); }
+
+.badge {
+  display: inline-block; padding: 0 7px; border-radius: 4px;
+  font-size: 0.85em; font-weight: 600; color: #fff;
+  background: var(--muted);
+}
+.agent-agy { background: var(--agy); }
+.agent-codex { background: var(--codex); }
+.agent-claude { background: var(--claude); }
+.agent-supervisor { background: var(--supervisor); }
+.agent-DONE { background: var(--ok); }
+
+details { margin-top: 4px; }
+summary { cursor: pointer; color: var(--muted); font-size: 0.9em; user-select: none; }
+summary:hover { color: var(--vscode-foreground); }
+
+.output {
+  max-height: 280px;
+  overflow: auto;
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.85em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.output.small { max-height: 160px; }
+.output:empty::before { content: "(sem saída ainda)"; color: var(--muted); }
+
+.spinner {
+  display: inline-block; width: 9px; height: 9px;
+  border: 2px solid var(--supervisor); border-right-color: transparent; border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+
+/* ── resultado ── */
+.result { margin-top: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; }
+.result h3 { margin: 0 0 6px; font-size: 1em; }
+.summary { white-space: pre-wrap; margin-bottom: 8px; }
+.files { margin: 4px 0; padding-left: 0; list-style: none; }
+.files li { display: flex; gap: 6px; align-items: baseline; padding: 1px 0; word-break: break-all; }
+.file-status { min-width: 22px; color: var(--warn); }
+a { color: var(--vscode-textLink-foreground); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── histórico ── */
+.history-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.history-item { display: block; padding: 5px 6px; border-radius: 4px; color: var(--vscode-foreground); }
+.history-item:hover { background: var(--vscode-list-hoverBackground); text-decoration: none; }
+.history-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; }
+
+/* ── projeto e worktree ── */
+.project {
+  display: flex; flex-direction: column; gap: 2px;
+  margin: 4px 0; padding: 6px 8px; border-radius: 4px; font-size: 0.9em;
+  border: 1px solid var(--border);
+}
+.notices .warn { font-size: 0.9em; }
+.cycle.setup { border-left-color: var(--warn); }
+.iso-actions { margin: 10px 0 6px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.iso-actions .row { margin-top: 6px; }
+
+/* ── aprovação, notas, uso ── */
+.approval {
+  margin: 8px 0; padding: 8px; border-radius: 6px;
+  border: 1px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.approval textarea { font-family: var(--vscode-editor-font-family); font-size: 0.85em; }
+.note-box { display: flex; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.note-box input { flex: 1; }
+.note { color: var(--supervisor); font-size: 0.9em; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; font-size: 0.9em; }
+.cycle.previous { opacity: 0.65; }
+.dev-badge { margin-top: 8px; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; border: 1px dashed var(--warn); color: var(--warn); }
+.week { margin: 6px 0 2px; }
+
+/* ── atividade e cota ── */
+.activity { list-style: none; margin: 4px 0; padding: 0; font-size: 0.88em; }
+.activity:empty { display: none; }
+.act { padding: 1px 0; word-break: break-all; }
+.act.running { color: var(--muted); }
+.act-warning { color: var(--warn); }
+.act-command { font-family: var(--vscode-editor-font-family); }
+.limits { display: flex; flex-direction: column; gap: 3px; padding: 8px 0 2px; font-size: 0.85em; }
+.limit { display: flex; align-items: center; gap: 6px; }
+.limit-label { width: 92px; color: var(--muted); }
+.limit-pct { width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+.bar { flex: 1; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.fill { display: block; height: 100%; background: var(--claude); }
+.fill.warm { background: var(--warn); }
+.fill.hot { background: var(--fail); }
+
+/* ── diff por passo ── */
+.step-files { margin-top: 6px; padding: 6px 8px; border-radius: 4px; background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.08)); font-size: 0.9em; }
+.step-files-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px; }
+.plus { color: var(--ok); font-variant-numeric: tabular-nums; }
+.minus { color: var(--fail); font-variant-numeric: tabular-nums; }
+
+/* ── fila e diagnóstico ── */
+.queue, .doctor { margin: 8px 0; padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9em; }
+.queue-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 4px; }
+.queue-list { margin: 0; padding-left: 20px; }
+.queue-list li { padding: 2px 0; }
+.queue-task { font-weight: 600; }
+.doctor-list { list-style: none; margin: 0; padding: 0; }
+.doctor-list li { padding: 2px 0; word-break: break-word; }
