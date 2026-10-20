@@ -34,6 +34,9 @@ def isolated_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(orch, "codex_mcp_servers", lambda: [])
     # O módulo guardou o stdout da importação; o pytest troca os fluxos por teste.
     monkeypatch.setattr(orch, "_log_stream", sys.stderr)
+    # Nunca ler as chaves reais do usuário: cada teste escreve o seu secrets.env.
+    monkeypatch.setattr(orch, "SECRETS_FILE", tmp_path / "secrets.env")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     return cache
 
 
@@ -78,6 +81,7 @@ def fakes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fakes:
     base = tmp_path / "fakes"
     base.mkdir()
     monkeypatch.setenv("FAKE_DIR", str(base))
+    monkeypatch.setenv("FAKE_ENV_KEYS", "OPENROUTER_API_KEY,OPENCODE_CONFIG")
     return Fakes(base)
 
 
@@ -94,6 +98,8 @@ def config_path(tmp_path: Path) -> Path:
     cfg["agents"]["agy"]["direct"] = {"cmd": _cmd("agy", "{prompt}"), "prompt_via": "arg"}
     cfg["agents"]["codex"]["direct"] = {"cmd": _cmd("codex", "{codex_mcp_off}", "exec", "-"), "prompt_via": "stdin"}
     cfg["agents"]["claude"]["direct"] = {"cmd": _cmd("claude"), "prompt_via": "stdin"}
+    # opencode mantém env, segredos e config_file do JSON real; só o binário é falso.
+    cfg["agents"]["opencode"]["direct"]["cmd"] = _cmd("opencode", "-f", "{prompt_file}")
     cfg["timeouts"] = {k: 60 for k in cfg["timeouts"]}
     path = tmp_path / "orchestrator.test.json"
     path.write_text(json.dumps(cfg), encoding="utf-8")

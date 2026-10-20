@@ -5,7 +5,7 @@
   const vscode = acquireVsCodeApi();
   const app = document.getElementById("app");
   const MAX_LINES = 2000;
-  const AGENT_LABEL = { supervisor: "supervisor", agy: "agy", codex: "codex", claude: "claude", DONE: "DONE" };
+  const AGENT_LABEL = { supervisor: "supervisor", agy: "agy", codex: "codex", claude: "claude", opencode: "opencode", DONE: "DONE" };
   const STATUS_LABEL = {
     done: "Concluído", max_loops: "Limite de ciclos", aborted: "Abortado",
     interrupted: "Interrompido", crashed: "Falhou", running: "Em andamento",

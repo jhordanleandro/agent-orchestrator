@@ -33,7 +33,9 @@ def main() -> int:
 
     stdin = "" if sys.stdin is None or sys.stdin.isatty() else sys.stdin.read()
     with (base / f"{name}.calls.jsonl").open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"args": args, "stdin": stdin, "cwd": os.getcwd(), "node": shutil.which("node")}) + "\n")
+        keys = [k for k in os.environ.get("FAKE_ENV_KEYS", "").split(",") if k]
+        fh.write(json.dumps({"args": args, "stdin": stdin, "cwd": os.getcwd(), "node": shutil.which("node"),
+                             "env": {k: os.environ.get(k) for k in keys}}) + "\n")
 
     for rel, content in action.get("write", {}).items():
         Path(rel).parent.mkdir(parents=True, exist_ok=True)

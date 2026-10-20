@@ -43,7 +43,10 @@ RUNS_DIR = CACHE_DIR / "runs"
 WORKTREES_DIR = CACHE_DIR / "worktrees"
 PROJECT_CONFIG_NAME = ".orchestrator.json"
 CLAUDE_LIMITS_FILE = CACHE_DIR / "claude-limits.json"
-WORKERS = ("agy", "codex", "claude")
+# Chaves de API dos agentes (ex.: OPENROUTER_API_KEY), uma por linha CHAVE=valor.
+# Fica fora de qualquer repositório; cada agente recebe só as que declarar.
+SECRETS_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "agent-orchestrator" / "secrets.env"
+WORKERS = ("agy", "codex", "claude", "opencode")
 
 
 # ─── Saída colorida ──────────────────────────────────────────────────────────
@@ -64,7 +67,7 @@ class C:
     CYAN = "\033[36m" if _on else ""
 
 
-AGENT_COLOR = {"agy": C.BLUE, "codex": C.GREEN, "claude": C.MAGENTA, "supervisor": C.CYAN}
+AGENT_COLOR = {"agy": C.BLUE, "codex": C.GREEN, "claude": C.MAGENTA, "opencode": C.YELLOW, "supervisor": C.CYAN}
 
 # Com --events jsonl o stdout é reservado aos eventos (lidos pela extensão do
 # editor) e os logs legíveis vão para o stderr.
@@ -373,6 +376,7 @@ class StreamParser:
     - codex-json:    `codex exec --json` (thread/turn/item.*)
     - claude-stream: `claude -p --output-format stream-json --verbose`
     - agy-stream:    `agy --output-format stream-json`
+    - opencode-json: `opencode run --format json` (step_start/tool_use/text/step_finish)
     Linhas que não são JSON passam adiante como texto.
     """
 
@@ -402,7 +406,8 @@ class StreamParser:
             return [Activity("message", line)] if line.strip() else []
         if not isinstance(event, dict):
             return []
-        handler = {"codex-json": self._codex, "claude-stream": self._claude, "agy-stream": self._agy}.get(self.fmt)
+        handler = {"codex-json": self._codex, "claude-stream": self._claude, "agy-stream": self._agy,
+                   "opencode-json": self._opencode}.get(self.fmt)
         return handler(event) if handler else []
 
     def text(self) -> str:
@@ -505,6 +510,79 @@ class StreamParser:
             if self.denied:
                 out.append(Activity("warning", "ações negadas em modo não interativo: " + ", ".join(sorted(set(self.denied)))))
         return out
+
+
+    # opencode run --format json
+    def _opencode(self, e: dict[str, Any]) -> list[Activity]:
+        kind, part = e.get("type"), e.get("part") or {}
+        out: list[Activity] = []
+        if kind == "tool_use":
+            state = part.get("state") or {}
+            name, inp = str(part.get("tool", "?")), state.get("input") or {}
+            failed = state.get("status") == "error"
+            if name == "bash":
+                cmd = str(inp.get("command", ""))
+                code = (state.get("metadata") or {}).get("exit")
+                code = 1 if failed and code is None else code
+                tail = str(state.get("error") or state.get("output") or "").strip().splitlines()[-3:]
+                out.append(Activity("command", f"{'❌' if failed or code not in (0, None) else '✅'} {cmd} (exit {code})",
+                                    {"command": cmd, "exit_code": code, "tail": "\n".join(tail)}))
+            elif self.WRITE_HINT.search(name) and inp.get("filePath"):
+                path = self.rel(str(inp["filePath"]))
+                out.append(Activity("file", f"{name} {path}{' (falhou)' if failed else ''}", {"path": path, "change": name}))
+            else:
+                target = inp.get("filePath") or inp.get("pattern") or inp.get("path") or ""
+                shown = self.rel(str(target)) if target else ""
+                out.append(Activity("tool", f"{name} {shown}{' (falhou)' if failed else ''}".strip(), {"tool": name}))
+            if failed and "rule which prevents" in str(state.get("error", "")):
+                self.denied.append(name)
+        elif kind == "text" and str(part.get("text", "")).strip():
+            text = str(part["text"]).strip()
+            self.messages.append(text)
+            self.final_text = text
+            out.append(Activity("message", text))
+        elif kind == "step_finish":
+            tokens = part.get("tokens") or {}
+            self.tokens += int(tokens.get("input", 0) or 0) + int(tokens.get("output", 0) or 0)
+            if part.get("cost"):
+                self.cost_usd = round((self.cost_usd or 0.0) + float(part["cost"]), 6)
+        elif kind == "error":
+            err = e.get("error") or {}
+            message = str((err.get("data") or {}).get("message") or err.get("name") or err)
+            out.append(Activity("warning", f"opencode: {message[:300]}"))
+        return out
+
+
+def load_secrets(path: Path | None = None) -> dict[str, str]:
+    """Lê o secrets.env (CHAVE=valor). Os valores nunca vão para log nem evento."""
+    secrets: dict[str, str] = {}
+    try:
+        lines = (path or SECRETS_FILE).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return secrets
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key, value = key.strip().removeprefix("export ").strip(), value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) and value:
+            secrets[key] = value
+    return secrets
+
+
+def agent_unavailable(spec: dict[str, Any], secrets: dict[str, str]) -> str | None:
+    """Motivo para um agente opcional não rodar (binário ou chave faltando)."""
+    direct = spec.get("direct") or {}
+    binary = (direct.get("cmd") or [""])[0]
+    if binary and not shutil.which(binary):
+        return f"`{binary}` não está no PATH"
+    missing = [k for k in direct.get("env_from_secrets", []) if k not in secrets and not os.environ.get(k)]
+    if missing:
+        return f"falta {', '.join(missing)} em {SECRETS_FILE}"
+    return None
 
 
 def save_claude_limits(limits: dict[str, Any]) -> None:
@@ -793,6 +871,7 @@ class Orchestrator:
         self.gate_passed_tree: str | None = None
         self.gate_failed_command: str | None = None
         self.review_extended = False
+        self.secrets = load_secrets()
         self.forbidden = [re.compile(p, re.IGNORECASE) for p in self.project.get("forbidden_patterns", [])]
         self.abort_on_forbidden = self.project.get("on_forbidden", "warn") == "abort"
         self.abort_event = threading.Event()
@@ -903,6 +982,10 @@ class Orchestrator:
                 "Leia o arquivo inteiro e siga-o exatamente, incluindo o formato de resposta pedido."
             )
 
+        config_file = self.workdir / f"{label}-{direct['config_file']['name']}" if direct.get("config_file") else None
+        if config_file:
+            # Configuração própria da CLI nesta execução (ex.: permissões do opencode).
+            config_file.write_text(json.dumps(direct["config_file"]["content"], ensure_ascii=False), encoding="utf-8")
         values = {
             "{prompt}": arg_prompt,
             "{prompt_file}": str(prompt_file),
@@ -910,6 +993,7 @@ class Orchestrator:
             "{repo}": str(self.repo),
             "{last_message_file}": str(last_msg),
             "{timeout}": str(timeout),
+            "{config_file}": str(config_file or ""),
         }
         cmd: list[str] = []
         for part in direct["cmd"]:
@@ -920,9 +1004,15 @@ class Orchestrator:
         parser = StreamParser(direct["stream_format"], self.repo) if direct.get("stream_format") else None
         if parser:
             on_line = self._parsing_line_handler(parser, on_line, agent or label, cycle)
+        env = self.env
+        if direct.get("env") or direct.get("env_from_secrets"):
+            env = {**self.env, **{k: self._fill(str(v), values) for k, v in (direct.get("env") or {}).items()}}
+            for key in direct.get("env_from_secrets", []):
+                if key in self.secrets:
+                    env[key] = self.secrets[key]
         result = run_command(
             cmd, self.repo, timeout, stdin_text=prompt if via == "stdin" else None, on_line=on_line,
-            env=self.env, abort=self.abort_event,
+            env=env, abort=self.abort_event,
         )
 
         if parser:
@@ -1310,8 +1400,13 @@ class Orchestrator:
                     self.state.status = "done"
                     self.state.final_summary = decision["summary"] or decision["reason"]
                     break
-                if agent not in WORKERS:
+                if agent not in WORKERS or agent not in self.cfg["agents"]:
                     log("⚠️ ", f"Agente desconhecido '{agent}'; tratado como codex.", C.YELLOW)
+                    agent = "codex"
+                spec = self.cfg["agents"][agent]
+                missing = spec.get("optional") and self.backend == "direct" and agent_unavailable(spec, self.secrets)
+                if missing:
+                    self._warn(f"{agent} indisponível ({missing}); o passo vai para o codex.")
                     agent = "codex"
                 if not decision["prompt"]:
                     decision["prompt"] = f"Continue a tarefa do usuário. Motivo do supervisor: {decision['reason']}"
@@ -1936,13 +2031,28 @@ def doctor(config: dict[str, Any], repo: Path, backend: str) -> list[dict[str, A
         fb = config.get("supervisor_fallback")
         if fb:
             binaries["supervisor reserva"] = fb["direct"]["cmd"][0]
+    optional = {name for name, spec in config["agents"].items() if spec.get("optional")}
     for label, binary in binaries.items():
         path = shutil.which(binary)
         if not path:
-            add(label, False, f"`{binary}` não está no PATH", "Instale a CLI ou ajuste o comando no orchestrator.json.")
+            if label in optional:
+                add(label, None, f"`{binary}` não está no PATH (opcional)", "Sem ele, os passos desse agente vão para o codex.")
+            else:
+                add(label, False, f"`{binary}` não está no PATH", "Instale a CLI ou ajuste o comando no orchestrator.json.")
             continue
         ver = run_command([binary, "--version"], repo, 20)
         add(label, True, f"{path} · {(ver.stdout or ver.stderr).strip().splitlines()[0] if (ver.stdout or ver.stderr).strip() else 'versão desconhecida'}")
+
+    # Chaves de API dos agentes: só a presença, nunca o valor.
+    secrets = load_secrets()
+    for name, spec in config["agents"].items():
+        keys = (spec.get("direct") or {}).get("env_from_secrets", [])
+        if not keys:
+            continue
+        missing = [k for k in keys if k not in secrets and not os.environ.get(k)]
+        add(f"{name}: chave de API", None if missing and name in optional else not missing,
+            f"faltando {', '.join(missing)}" if missing else f"{', '.join(keys)} presente(s)",
+            f"Coloque {', '.join(missing)}=… em {SECRETS_FILE} (chmod 600)." if missing else "")
 
     root = git_root(repo)
     if root is None:
@@ -2026,7 +2136,8 @@ def check_binaries(config: dict[str, Any], backend: str) -> list[str]:
     if backend == "mco":
         return [] if shutil.which("mco") else ["mco"]
     needed = {config["supervisor"]["direct"]["cmd"][0]}
-    needed |= {spec["direct"]["cmd"][0] for spec in config["agents"].values()}
+    # Agentes opcionais (ex.: opencode) não impedem a execução: o passo vai para o codex.
+    needed |= {spec["direct"]["cmd"][0] for spec in config["agents"].values() if not spec.get("optional")}
     return sorted(b for b in needed if not shutil.which(b))
 
 

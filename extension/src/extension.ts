@@ -83,9 +83,9 @@ function runsDir(): string {
 }
 
 // O editor aberto pelo menu do sistema herda um PATH mínimo; as CLIs dos
-// agentes (agy, codex, claude) costumam ficar em ~/.local/bin.
+// agentes (agy, codex, claude) costumam ficar em ~/.local/bin; o opencode, em ~/.opencode/bin.
 function childEnv(): NodeJS.ProcessEnv {
-  const extra = [path.join(os.homedir(), ".local", "bin"), "/usr/local/bin"];
+  const extra = [path.join(os.homedir(), ".local", "bin"), path.join(os.homedir(), ".opencode", "bin"), "/usr/local/bin"];
   const current = (process.env.PATH || "").split(path.delimiter);
   const merged = [...extra.filter((p) => !current.includes(p)), ...current];
   return { ...process.env, PATH: merged.join(path.delimiter), PYTHONUNBUFFERED: "1", NO_COLOR: "1" };

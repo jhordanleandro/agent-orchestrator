@@ -27,6 +27,7 @@ Só biblioteca padrão (Python 3.9+). Todas as flags das CLIs ficam em
 | supervisor | `codex exec -s read-only -C <repo> -` | não (só lê e decide) |
 | supervisor reserva | `agy --mode plan -p …` (timeout 180 s) | não |
 | agy (só quando pedido) | `agy --mode accept-edits -p …` | sim, edições |
+| opencode (alternativo, opcional) | `opencode run --format json -m openrouter/… -f <prompt>` | sim; rede, push e pastas externas bloqueados |
 | codex (backend) | `codex exec -s workspace-write -C <repo> -` | sim, só dentro do repo (sandbox) |
 | claude (revisão) | `claude -p --allowedTools Read,Grep,Glob,Bash(git diff:*)…` | não |
 
@@ -296,6 +297,30 @@ por decisão (e 501 s para responder "ok" fora do orquestrador): o log dele most
 de novo depois de 5 min. O codex decidiu o mesmo ciclo em 11 s. O prompt do
 supervisor já leva `git status --short`, `git diff --stat` e se as verificações
 passaram no código atual, então nenhum dos dois precisa rodar comandos.
+
+## Agente alternativo: opencode com modelo aberto
+
+O `opencode` usa um modelo aberto pelo OpenRouter (padrão `openrouter/qwen/qwen3-coder`;
+troque no `-m` do `orchestrator.json`). O supervisor o chama quando o codex falha duas
+vezes seguidas no mesmo problema, ou quando a tarefa/uma nota pede o opencode.
+
+1. Crie a chave em openrouter.ai (em *Settings → Privacy*, desligue os provedores que
+   treinam com seus dados — o código vai para o provedor do modelo).
+2. Salve-a fora de qualquer repositório, sem ecoar no terminal:
+   ```
+   mkdir -p ~/.config/agent-orchestrator && read -rs "k?Chave OpenRouter: " && printf 'OPENROUTER_API_KEY=%s\n' "$k" > ~/.config/agent-orchestrator/secrets.env && chmod 600 ~/.config/agent-orchestrator/secrets.env && unset k
+   ```
+3. `--doctor` confere o binário e a presença da chave (nunca o valor).
+
+- **Segredos:** `secrets.env` (CHAVE=valor) é lido pelo orquestrador; cada agente
+  recebe só as chaves listadas em `env_from_secrets`. Nada disso vai para log ou evento.
+- **Permissões:** a cada execução o orquestrador grava a configuração do opencode
+  (`config_file` → `OPENCODE_CONFIG`): edição liberada; `webfetch`, pastas fora do
+  projeto, `git push`, `curl`/`wget`, `ssh` e afins bloqueados. Nunca usa `--auto`.
+  Atenção: sem essa configuração, o `opencode run` executa comandos sem perguntar.
+- **Prompt:** vai anexado com `-f` (lido pela CLI) — o agente não lê pastas externas.
+- **Opcional:** sem o binário ou sem a chave, o passo vai para o codex com um aviso, e
+  a execução não falha. O painel mostra arquivos, comandos, tokens e custo do opencode.
 
 ## 2ª revisão depois de AJUSTES
 

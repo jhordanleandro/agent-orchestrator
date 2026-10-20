@@ -3,6 +3,7 @@
   --agy: #4c8bf5;
   --codex: #2fb57a;
   --claude: #c06adf;
+  --opencode: #e0883b;
   --supervisor: #1fb5c9;
   --ok: var(--vscode-testing-iconPassed, #2fb57a);
   --fail: var(--vscode-testing-iconFailed, #e5534b);
@@ -106,6 +107,7 @@ button.ghost { background: transparent; border-color: var(--border); color: var(
 .agent-agy { background: var(--agy); }
 .agent-codex { background: var(--codex); }
 .agent-claude { background: var(--claude); }
+.agent-opencode { background: var(--opencode); }
 .agent-supervisor { background: var(--supervisor); }
 .agent-DONE { background: var(--ok); }
 

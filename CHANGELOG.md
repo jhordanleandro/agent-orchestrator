@@ -12,6 +12,11 @@ A versão é a da extensão (`extension/package.json`); o `orchestrator.py` anda
   quando o projeto ganhou testes que não estão nas verificações.
 
 ### Novo
+- Agente alternativo **opencode** com modelo aberto via OpenRouter (padrão
+  `qwen/qwen3-coder`): entra quando o codex falha duas vezes ou quando pedido.
+  Chave em `~/.config/agent-orchestrator/secrets.env`, entregue só a ele; permissões
+  próprias por execução (rede, push e pastas externas bloqueados); prompt anexado;
+  opcional (sem binário/chave, o passo vai para o codex). `--doctor` confere a chave.
 - `review_followup_cycles` (padrão 2): revisão com AJUSTES perto do fim estende o
   limite uma vez para corrigir e revisar de novo; o supervisor pede a 2ª revisão em
   vez de encerrar após a correção. Evento `cycles_extended`, mostrado no painel.
