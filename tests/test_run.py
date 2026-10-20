@@ -28,6 +28,8 @@ def test_fluxo_feliz_termina_sozinho_apos_aprovado(config_path, repo, fakes, iso
     assert log["status"] == "done"
     assert [s["agent"] for s in log["steps"]] == ["codex", "claude"]
     assert "APROVADO" in log["final_summary"]
+    assert log["verification"]["checks"] == "passed" and log["verification"]["claude_review"] == "APROVADO"
+    assert not any("confira antes de aceitar" in w for w in log["warnings"])
     # Sem um 3º ciclo do supervisor só para "validar tudo de novo".
     assert len(fakes.calls("supervisor")) == 2
     # O claude fica sabendo que as verificações já passaram e não tenta rodá-las.
@@ -46,7 +48,8 @@ def test_aprovado_sem_verificacoes_nao_encerra_sozinho(config_path, repo, fakes,
     fakes.script("claude", [APROVADO])
     assert run(config_path, repo, "--isolation", "none") == 0
     assert len(fakes.calls("supervisor")) == 3
-    assert last_run_log(isolated_cache)["final_summary"] == "ok"
+    summary = last_run_log(isolated_cache)["final_summary"]
+    assert summary.startswith("ok\n\n") and "verificações: nenhuma configurada" in summary
 
 
 def test_ajustes_continua_ate_o_limite(config_path, repo, fakes, isolated_cache) -> None:
@@ -102,6 +105,28 @@ def test_filtro_barra_o_claude_quando_a_verificacao_falha(config_path, repo, fak
     assert "exit 3" in log["steps"][1]["prompt"]
     blocked = [e for e in events() if e["type"] == "gate_blocked"]
     assert blocked and blocked[0]["target"] == "codex"
+
+
+def test_veredito_do_codex_nao_vira_revisao_do_claude(config_path, repo, fakes, isolated_cache, events) -> None:
+    """3ª execução real: o filtro barrou o claude, o codex escreveu ele mesmo
+    "VEREDITO: APROVADO" e o supervisor encerrou dizendo que o claude aprovou."""
+    fakes.script("supervisor", [
+        decision("codex"), decision("claude", purpose="review"),
+        decision("DONE", summary="Revisão final do Claude: VEREDITO: APROVADO"),
+    ])
+    fakes.script("codex", [{"append": {"a.txt": "b\n"}}, {"out": "VEREDITO: APROVADO"}])
+    run(config_path, repo, "--isolation", "none", "--check", "exit 2")
+
+    log = last_run_log(isolated_cache)
+    assert log["claude_calls"] == 0
+    assert log["verification"] == {"claude_review": "nao_houve", "checks": "failed",
+                                   "failed_check": "exit 2", "commands": ["exit 2"]}
+    assert "revisão do claude: não houve" in log["final_summary"]
+    assert "FALHARAM (`exit 2`)" in log["final_summary"]
+    assert any("confira antes de aceitar" in w for w in log["warnings"])
+    assert "NÃO é o revisor" in fakes.calls("codex")[1]["stdin"]
+    end = [e for e in events() if e["type"] == "run_end"][0]
+    assert end["verification"]["claude_review"] == "nao_houve"
 
 
 def test_filtro_exige_alteracoes_antes_da_revisao(config_path, repo, fakes, isolated_cache) -> None:

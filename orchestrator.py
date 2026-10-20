@@ -335,6 +335,7 @@ class RunState:
     notes: list[str] = field(default_factory=list)
     stats: dict[str, dict[str, float]] = field(default_factory=dict)
     resumed_from: str | None = None
+    verification: dict[str, Any] | None = None
 
     def count(self, agent: str, seconds: float) -> None:
         entry = self.stats.setdefault(agent, {"calls": 0, "seconds": 0.0})
@@ -790,6 +791,7 @@ class Orchestrator:
         # Árvore git em que as verificações do filtro pré-claude passaram por
         # último: se a revisão aprovar essa mesma árvore, a execução termina.
         self.gate_passed_tree: str | None = None
+        self.gate_failed_command: str | None = None
         self.forbidden = [re.compile(p, re.IGNORECASE) for p in self.project.get("forbidden_patterns", [])]
         self.abort_on_forbidden = self.project.get("on_forbidden", "warn") == "abort"
         self.abort_event = threading.Event()
@@ -1151,10 +1153,12 @@ class Orchestrator:
             emit("gate_result", command=command, ok=res.ok, code=res.code,
                  seconds=round(res.seconds, 1), output=output)
             if not res.ok:
+                self.gate_failed_command = command
                 return False, "codex", f"A verificação local `{command}` falhou (exit {res.code}):\n{output}"
             log("✅", f"Passou: {command} ({res.seconds:.0f}s)", C.GREEN)
         if self.gate_cfg.get("commands"):
             self.gate_passed_tree = snapshot_tree(self.repo)
+            self.gate_failed_command = None
         return True, "", ""
 
     # — passos —
@@ -1314,8 +1318,11 @@ class Orchestrator:
                         redirected_from, agent = "claude", target
                         decision["reason"] = "Filtro de qualidade local barrou o claude"
                         decision["prompt"] = (
-                            f"{why}\n\nCorrija o problema acima no repositório e confirme que a verificação passa. "
-                            f"Contexto do que seria revisado: {decision['prompt']}"
+                            f"{why}\n\nCorrija o problema acima no repositório para que a verificação passe. "
+                            "Você NÃO é o revisor: não escreva VEREDITO nem aprove o código — a revisão é "
+                            "de outro agente, depois que as verificações passarem. Se a falha não tiver relação "
+                            "com a tarefa e não der para corrigir com segurança, explique exatamente a causa.\n\n"
+                            f"Contexto (o que o revisor iria olhar): {decision['prompt']}"
                         )
 
                 if self._needs_approval():
@@ -1531,7 +1538,48 @@ class Orchestrator:
                 files.append({"status": line[:2].strip(), "path": path})
         return files
 
+    def _verification_facts(self) -> dict[str, Any]:
+        """O que o próprio orquestrador viu — o resumo do supervisor pode
+        afirmar uma revisão que não aconteceu (já atribuiu ao claude um
+        VEREDITO escrito pelo codex)."""
+        reviews = [s for s in self.state.steps if s.agent == "claude" and s.code == 0]
+        verdict = review_verdict(reviews[-1].output) if reviews else None
+        commands = self.gate_cfg.get("commands", [])
+        if not commands:
+            checks = "none"
+        elif self.gate_passed_tree and self.gate_passed_tree == snapshot_tree(self.repo):
+            checks = "passed"
+        elif self.gate_passed_tree:
+            checks = "stale"
+        elif self.gate_failed_command:
+            checks = "failed"
+        else:
+            checks = "not_run"
+        return {"claude_review": verdict or ("sem_veredito" if reviews else "nao_houve"),
+                "checks": checks, "failed_check": self.gate_failed_command, "commands": commands}
+
+    def _facts_text(self, facts: dict[str, Any]) -> str:
+        review = {"APROVADO": "APROVADO", "AJUSTES": "pediu AJUSTES", "sem_veredito": "rodou, sem veredito",
+                  "nao_houve": "não houve"}[facts["claude_review"]]
+        checks = {
+            "none": "nenhuma configurada",
+            "passed": f"passaram no código final ({', '.join(facts['commands'])})",
+            "stale": "passaram, mas o código mudou depois",
+            "failed": f"FALHARAM (`{facts['failed_check']}`)",
+            "not_run": "não rodaram",
+        }[facts["checks"]]
+        return f"Conferido pelo orquestrador — revisão do claude: {review}; verificações: {checks}."
+
     def _finish(self) -> int:
+        if self.state.steps:
+            facts = self._verification_facts()
+            self.state.verification = facts
+            self.state.final_summary = f"{self.state.final_summary}\n\n{self._facts_text(facts)}".strip()
+            # Com verificações configuradas, DONE só é "limpo" com elas em dia e revisão aprovada.
+            if self.state.status == "done" and facts["commands"] and (
+                facts["checks"] != "passed" or facts["claude_review"] != "APROVADO"
+            ):
+                self._warn("Encerrado como DONE sem verificações em dia e revisão aprovada: confira antes de aceitar.")
         RUNS_DIR.mkdir(parents=True, exist_ok=True)
         log_path = RUNS_DIR / f"{unique_stamp(lambda s: (RUNS_DIR / f'{s}.json').exists())}.json"
         log_path.write_text(json.dumps(asdict(self.state), ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1543,7 +1591,7 @@ class Orchestrator:
         emit("run_end", status=self.state.status, summary=self.state.final_summary,
              claude_calls=self.state.claude_calls, steps=len(self.state.steps),
              log_path=str(log_path), changed_files=changed, isolation=self.state.isolation,
-             warnings=self.state.warnings, stats=self.state.stats)
+             warnings=self.state.warnings, stats=self.state.stats, verification=self.state.verification)
 
         banner("Resultado")
         color = C.GREEN if self.state.status == "done" else C.YELLOW
