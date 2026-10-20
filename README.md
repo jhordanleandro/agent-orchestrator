@@ -1,8 +1,8 @@
 # agent-orchestrator
 
 Uma instrução em linguagem natural → `codex` (só leitura) supervisiona e delega →
-`codex`/`agy` implementam backend/testes e frontend → `claude` só revisa no fim,
-atrás de um filtro local.
+`codex` implementa frontend, backend e testes (o `agy` só quando você pedir) →
+`claude` só revisa no fim, atrás de um filtro local.
 
 ```
 python3 orchestrator.py "Minha necessidade técnica aqui"
@@ -26,7 +26,7 @@ Só biblioteca padrão (Python 3.9+). Todas as flags das CLIs ficam em
 |---|---|---|
 | supervisor | `codex exec -s read-only -C <repo> -` | não (só lê e decide) |
 | supervisor reserva | `agy --mode plan -p …` (timeout 180 s) | não |
-| agy (frontend) | `agy --mode accept-edits -p …` | sim, edições |
+| agy (só quando pedido) | `agy --mode accept-edits -p …` | sim, edições |
 | codex (backend) | `codex exec -s workspace-write -C <repo> -` | sim, só dentro do repo (sandbox) |
 | claude (revisão) | `claude -p --allowedTools Read,Grep,Glob,Bash(git diff:*)…` | não |
 

@@ -191,6 +191,8 @@ def test_config_padrao_tem_os_campos_que_o_codigo_usa() -> None:
     # codex decide em segundos; o agy (reserva) às vezes trava 5 min no backend.
     assert cfg["supervisor"]["agent"] == "codex" and "read-only" in cfg["supervisor"]["direct"]["cmd"]
     assert cfg["supervisor_fallback"]["agent"] == "agy"
+    # Teste real de 20/10: o agy estourou 15 min duas vezes no frontend; o codex é o padrão.
+    assert "codex: agente padrão para TODO o código" in cfg["supervisor"]["system_prompt"]
     assert cfg["supervisor_fallback"]["timeout"] < cfg["timeouts"]["supervisor"]
 
 

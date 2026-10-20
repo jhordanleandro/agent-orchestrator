@@ -11,7 +11,13 @@ A versão é a da extensão (`extension/package.json`); o `orchestrator.py` anda
   `--init --force` detecta de novo e mantém o que você editou; o `--doctor` avisa
   quando o projeto ganhou testes que não estão nas verificações.
 
+### Mudou
+- O codex é o agente padrão também no frontend; o agy só entra quando a tarefa ou
+  uma nota pedir. No teste de projeto do zero (Next.js), o agy estourou os 15 min
+  duas vezes (o Gemini levava 2–4 min por resposta) e o codex fez tudo em menos de 5.
+
 ### Corrigido
+- O `.gitignore` do `--init` cobre saídas de build (`.next/`, `dist/`, `*.tsbuildinfo`…).
 - O supervisor podia encerrar dizendo que o claude aprovou quando o VEREDITO
   tinha sido escrito pelo codex (3ª execução real, `claude_calls` = 0). O resumo
   final agora traz "Conferido pelo orquestrador" (revisão e verificações de fato),

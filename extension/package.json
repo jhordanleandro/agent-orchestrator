@@ -1,7 +1,7 @@
 {
   "name": "agent-orchestrator",
   "displayName": "Orquestrador de Agentes",
-  "description": "Interface para o orchestrator.py: codex supervisiona, codex e agy implementam e claude revisa, com acompanhamento em tempo real.",
+  "description": "Interface para o orchestrator.py: codex supervisiona e implementa, claude revisa, com acompanhamento em tempo real.",
   "version": "0.3.0",
   "publisher": "jhordan",
   "private": true,
