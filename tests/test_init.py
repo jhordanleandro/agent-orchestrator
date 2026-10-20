@@ -38,7 +38,8 @@ def test_pasta_vazia_vira_repositorio_pronto(tmp_path: Path) -> None:
     assert cfg["isolation"] == "worktree" and cfg["checks"] == [] and cfg["setup"] == []
     assert cfg["templates"][0]["name"] == "Estrutura inicial do projeto"
     assert any(r"git\s+push" == p for p in cfg["forbidden_patterns"])
-    assert ".env" in (root / ".gitignore").read_text()
+    ignored = (root / ".gitignore").read_text()
+    assert ".env" in ignored and ".next/" in ignored and "*.tsbuildinfo" in ignored
     # O 1º commit leva só os arquivos do orquestrador e deixa a árvore limpa.
     assert git(root, "ls-tree", "--name-only", "HEAD").split() == [".gitignore", ".orchestrator.json"]
     assert git(root, "status", "--porcelain") == ""

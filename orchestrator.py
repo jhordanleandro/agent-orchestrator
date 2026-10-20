@@ -1624,6 +1624,14 @@ INIT_GITIGNORE = """# Segredos
 node_modules/
 .venv/
 __pycache__/
+
+# Saídas de build e testes (Next.js, bundlers, TypeScript, cobertura)
+.next/
+out/
+dist/
+build/
+coverage/
+*.tsbuildinfo
 """
 
 INIT_RULES = (
@@ -2060,7 +2068,7 @@ def main(argv: list[str] | None = None) -> int:
                 if result.get("node"):
                     print(f"  • Node {result['node']}")
                 if result["gitignore"]:
-                    print("  • .gitignore criado (.env, node_modules, .venv)")
+                    print("  • .gitignore criado (.env, dependências e saídas de build)")
                 if result["committed"]:
                     print("  • 1º commit feito (a worktree isolada parte dele)")
             for warning in result["warnings"]:

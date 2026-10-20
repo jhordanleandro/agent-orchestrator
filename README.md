@@ -67,7 +67,7 @@ python3 orchestrator.py --init --repo ~/projetos/meu-app
   - **Python:** venv (ou `uv sync`) e `pytest`/`ruff`/`mypy` se aparecerem no projeto.
   - **Nada reconhecido** (projeto do zero): sem verificações e com o modelo
     *Estrutura inicial do projeto* em primeiro lugar.
-- Cria `.gitignore` (segredos, `node_modules`, `.venv`) se não houver.
+- Cria `.gitignore` (segredos, `node_modules`, `.venv`, saídas de build como `.next/` e `*.tsbuildinfo`) se não houver.
 - Repositório sem commits: faz o 1º commit **só** com `.orchestrator.json` e
   `.gitignore` — a worktree isolada parte do HEAD. Outros arquivos da pasta
   ficam de fora, com aviso.
