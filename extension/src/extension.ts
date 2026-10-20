@@ -606,6 +606,74 @@ async function runDoctor(repo: string | undefined): Promise<unknown[]> {
   }
 }
 
+type InitResult = {
+  ok: boolean;
+  message: string;
+  path?: string;
+  repo?: string;
+  checks?: string[];
+  details?: string[];
+  created_repo?: boolean;
+  committed?: boolean;
+  warnings: string[];
+};
+
+// --init: prepara a pasta (git init + 1º commit se preciso) e gera o
+// .orchestrator.json com a stack detectada. Sem pasta aberta, pergunta qual.
+async function runInit(): Promise<void> {
+  let repo = pickRepo();
+  if (!repo) {
+    const picked = await vscode.window.showOpenDialog({
+      canSelectFolders: true,
+      canSelectFiles: false,
+      openLabel: "Configurar esta pasta",
+    });
+    if (!picked?.length) return;
+    repo = picked[0].fsPath;
+  }
+  let force = false;
+  if (fs.existsSync(path.join(repo, ".orchestrator.json"))) {
+    const choice = await vscode.window.showWarningMessage(
+      "Este projeto já tem .orchestrator.json. Detectar a stack de novo? Regras, variáveis, padrões proibidos e modelos que você editou são mantidos.",
+      { modal: true },
+      "Detectar de novo",
+    );
+    if (!choice) return;
+    force = true;
+  }
+  const cfg = vscode.workspace.getConfiguration("agentOrchestrator");
+  const args = [scriptPath(), "--init", "--events", "jsonl", "--repo", repo, ...(force ? ["--force"] : [])];
+  const res = await exec(cfg.get<string>("pythonPath", "python3"), args, repo);
+  let result: InitResult;
+  try {
+    result = JSON.parse(res.stdout.trim().split("\n").pop() || "") as InitResult;
+  } catch {
+    void vscode.window.showErrorMessage(`Orquestrador: --init falhou. ${(res.stderr || res.stdout).trim().slice(0, 300)}`);
+    return;
+  }
+  if (!result.ok) {
+    void vscode.window.showErrorMessage(`Orquestrador: ${result.message}`);
+    return;
+  }
+  if (result.path) {
+    await vscode.window.showTextDocument(vscode.Uri.file(result.path), { preview: false });
+  }
+  const parts = [
+    result.created_repo ? "repositório git criado" : "",
+    `${result.checks?.length ?? 0} verificação(ões)`,
+    result.committed ? "1º commit feito" : "",
+  ].filter(Boolean);
+  const inWorkspace = !!vscode.workspace.getWorkspaceFolder(vscode.Uri.file(repo));
+  const open = await vscode.window.showInformationMessage(
+    `Orquestrador configurado (${(result.details || []).join("; ")}): ${parts.join(", ")}.`,
+    ...(inWorkspace ? [] : ["Abrir pasta"]),
+  );
+  if (open === "Abrir pasta") {
+    await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(result.repo || repo));
+  }
+  for (const warning of result.warnings) void vscode.window.showWarningMessage(`Orquestrador: ${warning}`);
+}
+
 // A extensão está em "modo desenvolvimento" quando a pasta instalada é um
 // link para o código-fonte (scripts/dev-link.sh).
 function realExtensionPath(context: vscode.ExtensionContext): string {
@@ -816,6 +884,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await vscode.commands.executeCommand(`${VIEW_ID}.focus`);
       provider.post({ type: "doctor", checks: await runDoctor(pickRepo()) });
     }),
+    vscode.commands.registerCommand("agentOrchestrator.init", runInit),
     { dispose: () => runner.stop() },
   );
 }

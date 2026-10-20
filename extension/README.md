@@ -4,7 +4,9 @@ Painel para o `orchestrator.py`: codex supervisiona, codex e agy implementam e
 claude revisa, com cada ciclo, decisão, verificação e saída dos agentes ao vivo.
 
 Abra pelo ícone **Orquestrador** na barra lateral, ou pelo comando
-**Orquestrador: Executar tarefa…**. Configurações em `agentOrchestrator.*`
+**Orquestrador: Executar tarefa…**. Para um projeto novo, rode antes
+**Orquestrador: Configurar projeto** (o `--init`: git, 1º commit e `.orchestrator.json`
+com a stack detectada; sem pasta aberta, ele pergunta qual). Configurações em `agentOrchestrator.*`
 (inclusive `templates`, os modelos de tarefa do painel).
 
 ## Desenvolvimento

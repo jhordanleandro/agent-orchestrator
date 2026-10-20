@@ -51,6 +51,34 @@ repositório e sua árvore de trabalho não são tocados.
 - Arquivos fora do git (como `.env`) **não existem** na worktree, a menos que estejam em `copy_files`.
 - `--isolation none` (ou `"isolation": "none"`) volta ao modo antigo, direto na pasta.
 
+## Projeto do zero (`--init`)
+
+```
+python3 orchestrator.py --init --repo ~/projetos/meu-app
+```
+
+- Pasta inexistente ou sem git: cria a pasta e roda `git init -b main`.
+- Detecta a stack pela raiz, sem rodar nada:
+  - **Node:** gerenciador pelo lockfile (pnpm, yarn, bun, npm), setup com instalação
+    travada, verificações pelos scripts `typecheck`/`lint`/`test` (ou `tsc --noEmit` se
+    houver `tsconfig.json`), versão do Node por `.nvmrc`/`.node-version`/`engines` e
+    `CI=1`. Com Prisma: `prisma generate` no setup, `DATABASE_URL` bloqueada e
+    comandos de banco proibidos.
+  - **Python:** venv (ou `uv sync`) e `pytest`/`ruff`/`mypy` se aparecerem no projeto.
+  - **Nada reconhecido** (projeto do zero): sem verificações e com o modelo
+    *Estrutura inicial do projeto* em primeiro lugar.
+- Cria `.gitignore` (segredos, `node_modules`, `.venv`) se não houver.
+- Repositório sem commits: faz o 1º commit **só** com `.orchestrator.json` e
+  `.gitignore` — a worktree isolada parte do HEAD. Outros arquivos da pasta
+  ficam de fora, com aviso.
+- Já existe `.orchestrator.json`: recusa. `--init --force` detecta de novo `setup`,
+  `checks` e `node` e mantém regras, variáveis, padrões proibidos e modelos.
+
+Fluxo para começar do zero: `--init` → tarefa com o modelo *Estrutura inicial* →
+aceitar e commitar → `--init --force` (agora com testes/lint nas verificações) →
+tarefas normais. O `--doctor` avisa quando o projeto ganhou testes que ainda não
+estão nas verificações. Na extensão: **Orquestrador: Configurar projeto**.
+
 ## Configuração por projeto (`.orchestrator.json` na raiz do repositório)
 
 ```json
@@ -101,6 +129,7 @@ impede antes de rodar. A proteção real vem de a worktree não ter `.env` e de
 --control stdin   aceita comandos JSON no stdin: note / approve / reject / stop
 --approve MODO    none | first | all — pausa para aprovar (ou editar) o passo; exige --control
 --doctor          checa CLIs, git, projeto, pasta das worktrees e cota do claude (não gasta cota)
+--init [--force]  prepara o repositório e gera o .orchestrator.json pela stack (ver abaixo)
 ```
 
 ## Filtro pré-claude (economia de cota)
@@ -306,6 +335,8 @@ nunca para o `~/.cache` real.
 
 - `test_unit.py`: parser da decisão, veredito, streams das CLIs, `.orchestrator.json`,
   `run_command` (timeout mata o grupo, abort) e git (retratos, aceitar com e sem conflito).
+- `test_init.py`: `--init` em pasta vazia, Node, Python, `--force` e a 1ª tarefa
+  numa worktree de um repositório recém-criado.
 - `test_run.py`: execuções completas via `main()` — fim automático após APROVADO,
   AJUSTES até o limite, supervisor reserva, filtro barrando o claude, padrão proibido,
   flags de MCP do codex, worktree + aceitar, retomada, aprovação/recusa e Node do projeto

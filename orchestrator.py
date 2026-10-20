@@ -1613,6 +1613,266 @@ class Orchestrator:
         return 0 if self.state.status == "done" else 1
 
 
+# ─── Configuração inicial do projeto (--init) ────────────────────────────────
+
+INIT_GITIGNORE = """# Segredos
+.env
+.env.*
+!.env.example
+
+# Dependências e caches
+node_modules/
+.venv/
+__pycache__/
+"""
+
+INIT_RULES = (
+    "- Responda, comente o código e escreva mensagens em PT-BR.\n"
+    "- Siga o estilo e as convenções do código existente.\n"
+    "- Toda funcionalidade nova vem com testes.\n"
+    "- Não publique nada nem faça deploy.\n"
+    "- Não leia, crie nem altere arquivos .env ou com segredos; documente as variáveis em .env.example."
+)
+
+INIT_FORBIDDEN = [r"git\s+push", r"\brm\s+-rf\s+(/|~)(\s|$)", r"npm\s+publish"]
+PRISMA_FORBIDDEN = [
+    r"prisma\s+(db\s+(push|seed|execute|pull)|migrate)",
+    r"\b(DROP|TRUNCATE)\s+(TABLE|DATABASE)\b",
+]
+
+INIT_TEMPLATES = [
+    {
+        "name": "Funcionalidade com testes",
+        "task": "Implementar <funcionalidade>.\nIncluir testes do caso feliz e dos erros principais.\n"
+                "Pronto quando: os testes novos passam junto com as verificações do projeto.",
+        "maxLoops": 6,
+    },
+    {
+        "name": "Corrigir bug com teste",
+        "task": "Corrigir o bug: <sintoma e como reproduzir>.\nPrimeiro um teste que falha reproduzindo o bug, "
+                "depois a correção.\nPronto quando: o teste passa junto com as verificações do projeto.",
+        "maxLoops": 5,
+    },
+]
+
+SCAFFOLD_TEMPLATE = {
+    "name": "Estrutura inicial do projeto",
+    "task": "Criar a estrutura inicial do projeto: <linguagem e framework, ex.: Next.js com TypeScript>.\n"
+            "Incluir: gerenciador de pacotes com lockfile, scripts de test, lint e typecheck (ou equivalentes), "
+            "um teste de exemplo passando, .env.example e um README curto com como rodar.\n"
+            "Pronto quando: os comandos de teste, lint e tipos rodam sem erro.",
+    "maxLoops": 6,
+}
+
+# Scripts do package.json usados como verificação, na ordem em que rodam.
+NODE_CHECK_SCRIPTS = (("typecheck", "type-check", "check-types", "tsc"), ("lint",), ("test",))
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _node_major(root: Path, pkg: dict[str, Any]) -> str | None:
+    """Versão do Node: .nvmrc / .node-version, senão o primeiro número de engines.node."""
+    for name in (".nvmrc", ".node-version"):
+        try:
+            text = (root / name).read_text(encoding="utf-8").strip().lstrip("v")
+        except OSError:
+            continue
+        m = re.match(r"(\d+)", text)
+        if m:
+            return m.group(1)
+    m = re.search(r"(\d+)", str((pkg.get("engines") or {}).get("node", "")))
+    return m.group(1) if m else None
+
+
+def _detect_node(root: Path) -> dict[str, Any]:
+    pkg = _read_json(root / "package.json")
+    locks = {"pnpm-lock.yaml": "pnpm", "yarn.lock": "yarn", "bun.lockb": "bun", "bun.lock": "bun",
+             "package-lock.json": "npm"}
+    pm = next((tool for lock, tool in locks.items() if (root / lock).exists()), None)
+    has_lock = pm is not None
+    if pm is None:
+        declared = str(pkg.get("packageManager", "")).split("@")[0]
+        pm = declared if declared in ("pnpm", "yarn", "bun", "npm") else "npm"
+    install = {
+        "pnpm": "pnpm install --frozen-lockfile --prefer-offline", "npm": "npm ci",
+        "yarn": "yarn install --frozen-lockfile", "bun": "bun install --frozen-lockfile",
+    }[pm] if has_lock else f"{pm} install"
+    run = {"pnpm": "pnpm", "npm": "npm run", "yarn": "yarn", "bun": "bun run"}[pm]
+    run_bin = {"pnpm": "pnpm exec", "npm": "npx", "yarn": "yarn", "bun": "bunx"}[pm]
+
+    scripts = pkg.get("scripts") or {}
+    checks: list[str] = []
+    for names in NODE_CHECK_SCRIPTS:
+        found = next((n for n in names if n in scripts), None)
+        # O "test" padrão do npm init só falha ("no test specified").
+        if found and "no test specified" not in str(scripts[found]):
+            checks.append(f"{run} {found}")
+        elif names[0] == "typecheck" and (root / "tsconfig.json").exists():
+            checks.append(f"{run_bin} tsc --noEmit")
+
+    deps = {**(pkg.get("dependencies") or {}), **(pkg.get("devDependencies") or {})}
+    prisma = "prisma" in deps or "@prisma/client" in deps
+    setup = [install] + ([f"{run_bin} prisma generate"] if prisma else [])
+    details = [f"Node com {pm}" + ("" if has_lock else " (sem lockfile)")]
+    if prisma:
+        details.append("Prisma: cliente gerado no setup e comandos de banco proibidos")
+    # CI=1: vitest/jest não entram em modo watch e ferramentas não pedem confirmação.
+    env: dict[str, Any] = {"CI": "1"}
+    if prisma:
+        env["DATABASE_URL"] = "mysql://orquestrador-bloqueado:x@127.0.0.1:1/bloqueado"
+    return {
+        "stack": "node", "details": details, "setup": setup, "checks": checks, "env": env,
+        "node": _node_major(root, pkg), "forbidden": PRISMA_FORBIDDEN if prisma else [],
+    }
+
+
+def _detect_python(root: Path) -> dict[str, Any]:
+    text = ""
+    for name in ("pyproject.toml", "requirements.txt", "requirements-dev.txt", "setup.cfg"):
+        try:
+            text += (root / name).read_text(encoding="utf-8") + "\n"
+        except OSError:
+            pass
+    if (root / "uv.lock").exists() and shutil.which("uv"):
+        setup, py = ["uv sync"], "uv run python"
+        details = ["Python com uv"]
+    else:
+        setup = ["python3 -m venv .venv"]
+        for req in ("requirements.txt", "requirements-dev.txt"):
+            if (root / req).exists():
+                setup.append(f".venv/bin/pip install -q -r {req}")
+        if (root / "pyproject.toml").exists() and not any("requirements" in s for s in setup):
+            dev = re.search(r"^\s*dev\s*=", text, re.MULTILINE)
+            setup.append(".venv/bin/pip install -q -e " + ('".[dev]"' if dev else "."))
+        py = ".venv/bin/python"
+        details = ["Python com venv"]
+    checks = []
+    if re.search(r"\bpytest\b", text) or (root / "tests").is_dir():
+        checks.append(f"{py} -m pytest -q")
+    if re.search(r"\bruff\b", text) or (root / "ruff.toml").exists():
+        checks.append(f"{py} -m ruff check .")
+    if re.search(r"\bmypy\b", text) or (root / "mypy.ini").exists():
+        checks.append(f"{py} -m mypy .")
+    return {"stack": "python", "details": details, "setup": setup, "checks": checks, "env": {},
+            "node": None, "forbidden": []}
+
+
+def detect_project(root: Path) -> dict[str, Any]:
+    """Descobre a stack pela raiz do repositório (sem rodar nada)."""
+    if (root / "package.json").exists():
+        return _detect_node(root)
+    if any((root / f).exists() for f in ("pyproject.toml", "requirements.txt", "setup.py")):
+        return _detect_python(root)
+    return {"stack": None, "details": ["pasta sem stack reconhecida (projeto do zero)"], "setup": [],
+            "checks": [], "env": {}, "node": None, "forbidden": []}
+
+
+def build_project_config(detected: dict[str, Any], existing: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Monta o .orchestrator.json. Com `existing` (--init --force), refaz só o
+    que é detectável — setup, checks e node — e mantém o que você editou."""
+    old = existing or {}
+    cfg: dict[str, Any] = {"isolation": old.get("isolation", "worktree")}
+    node = detected["node"] or old.get("node")
+    if node:
+        cfg["node"] = node
+    if "max_loops" in old:
+        cfg["max_loops"] = old["max_loops"]
+    cfg["setup"] = detected["setup"] or old.get("setup", [])
+    cfg["checks"] = detected["checks"] or old.get("checks", [])
+    cfg["env"] = {**detected["env"], **old.get("env", {})}
+    if old.get("copy_files"):
+        cfg["copy_files"] = old["copy_files"]
+    cfg["rules"] = old.get("rules", INIT_RULES)
+    patterns = list(old.get("forbidden_patterns", INIT_FORBIDDEN))
+    for pattern in detected["forbidden"]:
+        if pattern not in patterns:
+            patterns.append(pattern)
+    cfg["forbidden_patterns"] = patterns
+    cfg["on_forbidden"] = old.get("on_forbidden", "abort")
+    templates = list(old.get("templates", INIT_TEMPLATES))
+    names = {t.get("name") for t in templates}
+    if detected["stack"] is None and SCAFFOLD_TEMPLATE["name"] not in names:
+        templates.insert(0, SCAFFOLD_TEMPLATE)
+    cfg["templates"] = templates
+    return cfg
+
+
+def init_project(path: Path, force: bool = False) -> dict[str, Any]:
+    """--init: prepara uma pasta (até vazia) para o orquestrador.
+
+    Cria o repositório git se preciso, escreve o .orchestrator.json com o que
+    detectar da stack e, num repositório sem commits, faz o 1º commit só com
+    os arquivos do orquestrador — a worktree isolada parte do HEAD.
+    """
+    result: dict[str, Any] = {"ok": False, "warnings": [], "created_repo": False, "committed": False,
+                              "gitignore": False}
+    path = path.resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    root = git_root(path)
+    if root is None:
+        res = git(["init", "-q", "-b", "main"], path, 30)
+        if not res.ok:
+            result["message"] = f"git init falhou: {clip(res.stderr, 500)}"
+            return result
+        root, result["created_repo"] = path, True
+    result["repo"] = str(root)
+
+    cfg_path = root / PROJECT_CONFIG_NAME
+    existing = None
+    if cfg_path.exists():
+        if not force:
+            result["message"] = (f"{cfg_path} já existe. Use --init --force para detectar a stack de novo "
+                                 "(mantém regras, variáveis, padrões e modelos que você editou).")
+            result["path"] = str(cfg_path)
+            return result
+        existing = _read_json(cfg_path)
+
+    detected = detect_project(root)
+    cfg = build_project_config(detected, existing)
+    cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    result.update(path=str(cfg_path), stack=detected["stack"], details=detected["details"],
+                  setup=cfg["setup"], checks=cfg["checks"], node=cfg.get("node"))
+
+    gitignore = root / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text(INIT_GITIGNORE, encoding="utf-8")
+        result["gitignore"] = True
+
+    if not cfg["checks"]:
+        result["warnings"].append(
+            "Sem verificações: o filtro só confere se algo mudou e não há fim automático após a revisão. "
+            "Depois que o projeto tiver testes/lint, rode --init --force.")
+    if cfg.get("node"):
+        bin_dir, _ = resolve_node_bin(cfg["node"])
+        if bin_dir is None:
+            result["warnings"].append(f"Node {cfg['node']} não está no fnm: fnm install {cfg['node']}")
+
+    has_head = git(["rev-parse", "--verify", "--quiet", "HEAD"], root, 30).ok
+    if not has_head:
+        files = [PROJECT_CONFIG_NAME] + ([".gitignore"] if result["gitignore"] else [])
+        git(["add", "--", *files], root, 30)
+        res = git(["commit", "-q", "-m", "chore: configurar o orquestrador de agentes", "--", *files], root, 60)
+        if res.ok:
+            result["committed"] = True
+        else:
+            result["warnings"].append(f"Não consegui fazer o 1º commit ({clip(res.stderr.strip(), 300)}). "
+                                      "Faça um commit antes da 1ª tarefa: a worktree parte do HEAD.")
+        others = [line[3:] for line in git(["status", "--porcelain"], root, 30).stdout.splitlines()]
+        if others:
+            result["warnings"].append(
+                f"{len(others)} arquivo(s) da pasta ficaram fora do 1º commit (ex.: {others[0]}). "
+                "Commite o que os agentes devem ver: a worktree parte do HEAD.")
+    result["ok"] = True
+    result["message"] = f"{'Atualizado' if existing is not None else 'Criado'}: {cfg_path}"
+    return result
+
+
 # ─── Diagnóstico do ambiente (--doctor) ──────────────────────────────────────
 
 
@@ -1671,8 +1931,10 @@ def doctor(config: dict[str, Any], repo: Path, backend: str) -> list[dict[str, A
                                   if c.split() and not shutil.which(c.split()[0])})
                 detail = (f"{len(project.get('checks', []))} verificação(ões), {len(project.get('templates', []))} modelo(s), "
                           f"isolamento {project.get('isolation', config.get('isolation', 'worktree'))}")
-                add("Configuração do projeto", not missing, detail,
-                    f"Comandos não encontrados no PATH: {', '.join(missing)}" if missing else "")
+                hint = f"Comandos não encontrados no PATH: {', '.join(missing)}" if missing else ""
+                if not project.get("checks") and detect_project(root)["checks"]:
+                    hint = "O projeto já tem testes/lint que não estão nas verificações: rode --init --force."
+                add("Configuração do projeto", not missing, detail, hint)
                 if project.get("node"):
                     bin_dir, err = resolve_node_bin(project["node"])
                     add(f"Node {project['node']} (projeto)", bin_dir is not None,
@@ -1680,7 +1942,7 @@ def doctor(config: dict[str, Any], repo: Path, backend: str) -> list[dict[str, A
                         "" if bin_dir else f"Instale com: fnm install {project['node']}")
             else:
                 add("Configuração do projeto", None, "sem .orchestrator.json",
-                    "Opcional: defina verificações, variáveis bloqueadas e modelos para este projeto.")
+                    "Rode --init (ou o comando Orquestrador: Configurar projeto) para gerar com a stack detectada.")
 
     try:
         WORKTREES_DIR.mkdir(parents=True, exist_ok=True)
@@ -1759,9 +2021,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--control", choices=("stdin",), help="aceita comandos JSON no stdin (notas, aprovação) — usado pela extensão")
     p.add_argument("--doctor", action="store_true", help="checa o ambiente (CLIs, git, projeto, cota) sem gastar cota")
     p.add_argument("--approve", choices=("none", "first", "all"), help="pausa para aprovar o passo: só o primeiro ou todos (exige --control)")
+    p.add_argument("--init", action="store_true", help="prepara o repositório (git init, 1º commit) e gera o .orchestrator.json pela stack")
+    p.add_argument("--force", action="store_true", help="com --init: detecta de novo e mantém o que você editou")
     args = p.parse_args(argv)
-    if not (args.task or args.accept or args.discard or args.resume or args.doctor):
-        p.error("informe a tarefa (ou --accept/--discard BRANCH, ou --resume LOG)")
+    if not (args.task or args.accept or args.discard or args.resume or args.doctor or args.init):
+        p.error("informe a tarefa (ou --init, --accept/--discard BRANCH, ou --resume LOG)")
+    if args.force and not args.init:
+        p.error("--force só vale com --init")
     if args.approve in ("first", "all") and args.control != "stdin":
         p.error("--approve precisa de --control stdin (a aprovação chega por ele)")
     return args
@@ -1778,6 +2044,28 @@ def main(argv: list[str] | None = None) -> int:
     # O botão Parar da extensão manda SIGTERM: vira o mesmo caminho do Ctrl+C,
     # que encerra o agente em execução (e os filhos dele) antes de sair.
     signal.signal(signal.SIGTERM, _raise_interrupt)
+    if args.init:
+        result = init_project(Path(args.repo), force=args.force)
+        if args.events:
+            print(json.dumps({"type": "init", **result}, ensure_ascii=False))
+        else:
+            mark = f"{C.GREEN}✔{C.RESET}" if result["ok"] else f"{C.RED}✘{C.RESET}"
+            print(f"{mark} {result['message']}")
+            if result["ok"]:
+                if result["created_repo"]:
+                    print("  • repositório git criado (branch main)")
+                print(f"  • stack: {'; '.join(result['details'])}")
+                print(f"  • setup: {', '.join(result['setup']) or 'nenhum'}")
+                print(f"  • verificações: {', '.join(result['checks']) or 'nenhuma'}")
+                if result.get("node"):
+                    print(f"  • Node {result['node']}")
+                if result["gitignore"]:
+                    print("  • .gitignore criado (.env, node_modules, .venv)")
+                if result["committed"]:
+                    print("  • 1º commit feito (a worktree isolada parte dele)")
+            for warning in result["warnings"]:
+                print(f"  {C.YELLOW}⚠ {warning}{C.RESET}")
+        return 0 if result["ok"] else 1
     if args.accept or args.discard:
         branch = args.accept or args.discard
         if not branch.startswith("orch/"):

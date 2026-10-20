@@ -4,6 +4,13 @@ A versão é a da extensão (`extension/package.json`); o `orchestrator.py` anda
 
 ## Não lançado
 
+### Novo
+- `--init` (e o comando **Orquestrador: Configurar projeto**): prepara um repositório
+  do zero (git init, `.gitignore`, 1º commit só com os arquivos do orquestrador) e gera
+  o `.orchestrator.json` pela stack detectada (Node/pnpm/npm/yarn/bun, Prisma, Python).
+  `--init --force` detecta de novo e mantém o que você editou; o `--doctor` avisa
+  quando o projeto ganhou testes que não estão nas verificações.
+
 ### Corrigido
 - O supervisor podia encerrar dizendo que o claude aprovou quando o VEREDITO
   tinha sido escrito pelo codex (3ª execução real, `claude_calls` = 0). O resumo
