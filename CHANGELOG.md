@@ -2,6 +2,16 @@
 
 A versão é a da extensão (`extension/package.json`); o `orchestrator.py` anda junto.
 
+## Não lançado
+
+### Corrigido
+- O supervisor podia encerrar dizendo que o claude aprovou quando o VEREDITO
+  tinha sido escrito pelo codex (3ª execução real, `claude_calls` = 0). O resumo
+  final agora traz "Conferido pelo orquestrador" (revisão e verificações de fato),
+  o campo `verification` no log e em `run_end`, e um aviso quando DONE sai sem
+  verificações em dia e revisão aprovada.
+- O agente que recebe o trabalho no lugar do claude é avisado de que não é o revisor.
+
 ## 0.3.0 — 20/10/2026
 
 Fechada depois de duas execuções reais no prof-jhordan-hub
