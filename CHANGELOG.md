@@ -11,6 +11,11 @@ A versão é a da extensão (`extension/package.json`); o `orchestrator.py` anda
   `--init --force` detecta de novo e mantém o que você editou; o `--doctor` avisa
   quando o projeto ganhou testes que não estão nas verificações.
 
+### Novo
+- `review_followup_cycles` (padrão 2): revisão com AJUSTES perto do fim estende o
+  limite uma vez para corrigir e revisar de novo; o supervisor pede a 2ª revisão em
+  vez de encerrar após a correção. Evento `cycles_extended`, mostrado no painel.
+
 ### Mudou
 - O codex é o agente padrão também no frontend; o agy só entra quando a tarefa ou
   uma nota pedir. No teste de projeto do zero (Next.js), o agy estourou os 15 min

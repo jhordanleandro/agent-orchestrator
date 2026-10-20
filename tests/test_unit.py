@@ -193,6 +193,9 @@ def test_config_padrao_tem_os_campos_que_o_codigo_usa() -> None:
     assert cfg["supervisor_fallback"]["agent"] == "agy"
     # Teste real de 20/10: o agy estourou 15 min duas vezes no frontend; o codex é o padrão.
     assert "codex: agente padrão para TODO o código" in cfg["supervisor"]["system_prompt"]
+    # Depois de AJUSTES, o supervisor pede nova revisão em vez de encerrar.
+    assert "peça NOVA revisão do claude" in cfg["supervisor"]["system_prompt"]
+    assert cfg["review_followup_cycles"] == 2
     assert cfg["supervisor_fallback"]["timeout"] < cfg["timeouts"]["supervisor"]
 
 

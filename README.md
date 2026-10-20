@@ -297,6 +297,18 @@ de novo depois de 5 min. O codex decidiu o mesmo ciclo em 11 s. O prompt do
 supervisor já leva `git status --short`, `git diff --stat` e se as verificações
 passaram no código atual, então nenhum dos dois precisa rodar comandos.
 
+## 2ª revisão depois de AJUSTES
+
+Se a revisão do claude termina com `VEREDITO: AJUSTES` e restam menos de
+`review_followup_cycles` ciclos (padrão 2), o limite é estendido **uma vez** para
+caber "corrigir" + "revisar de novo" — desde que ainda haja chamadas ao claude
+(`claude_policy.max_calls_per_run`). O supervisor pede a 2ª revisão em vez de
+encerrar logo após a correção. O painel mostra o aviso da extensão; `0` desliga.
+
+Motivo: no teste da calculadora (Next.js), com 4 ciclos, implementar → revisar →
+corrigir esgotou o limite e o código corrigido saiu sem revisão — o claude tinha
+achado um bug real de ponto flutuante, e a correção só foi conferida à mão.
+
 ## Fim automático após a revisão
 
 O claude termina a revisão com `VEREDITO: APROVADO` ou `VEREDITO: AJUSTES`

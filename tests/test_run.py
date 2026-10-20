@@ -52,14 +52,45 @@ def test_aprovado_sem_verificacoes_nao_encerra_sozinho(config_path, repo, fakes,
     assert summary.startswith("ok\n\n") and "verificações: nenhuma configurada" in summary
 
 
-def test_ajustes_continua_ate_o_limite(config_path, repo, fakes, isolated_cache) -> None:
+def test_ajustes_com_ciclos_sobrando_nao_estende(config_path, repo, fakes, isolated_cache, events) -> None:
     fakes.script("supervisor", [decision("codex"), decision("claude", purpose="review"), decision("codex")])
     fakes.script("codex", [{"append": {"a.txt": "b\n"}}])
     fakes.script("claude", [AJUSTES])
-    assert run(config_path, repo, "--isolation", "none", "--check", "true", "--max-loops", "3") == 1
+    assert run(config_path, repo, "--isolation", "none", "--check", "true", "--max-loops", "4") == 1
     log = last_run_log(isolated_cache)
     assert log["status"] == "max_loops"
-    assert [s["agent"] for s in log["steps"]] == ["codex", "claude", "codex"]
+    assert [s["agent"] for s in log["steps"]] == ["codex", "claude", "codex", "codex"]
+    assert not [e for e in events() if e["type"] == "cycles_extended"]
+
+
+def test_ajustes_no_fim_estende_para_corrigir_e_revisar(config_path, repo, fakes, isolated_cache, events) -> None:
+    """Calculadora (20/10): com 4 ciclos, implementar → revisar (AJUSTES) → corrigir
+    esgotava o limite e o código corrigido saía sem 2ª revisão."""
+    fakes.script("supervisor", [decision("codex"), decision("claude", purpose="review"),
+                                decision("codex", "corrija"), decision("claude", purpose="review")])
+    fakes.script("codex", [{"append": {"a.txt": "b\n"}}])
+    fakes.script("claude", [AJUSTES, APROVADO])
+    assert run(config_path, repo, "--isolation", "none", "--check", "true", "--max-loops", "2") == 0
+
+    log = last_run_log(isolated_cache)
+    assert [(s["cycle"], s["agent"]) for s in log["steps"]] == [(1, "codex"), (2, "claude"), (3, "codex"), (4, "claude")]
+    assert log["claude_calls"] == 2 and log["status"] == "done"
+    assert log["verification"]["claude_review"] == "APROVADO" and log["verification"]["checks"] == "passed"
+    extended = [e for e in events() if e["type"] == "cycles_extended"]
+    assert len(extended) == 1 and extended[0]["max"] == 4
+
+
+def test_ajustes_sem_chamadas_ao_claude_nao_estende(config_path, repo, fakes, isolated_cache) -> None:
+    cfg = json.loads(config_path.read_text())
+    cfg["claude_policy"]["max_calls_per_run"] = 1
+    config_path.write_text(json.dumps(cfg))
+    fakes.script("supervisor", [decision("codex"), decision("claude", purpose="review"), decision("codex")])
+    fakes.script("codex", [{"append": {"a.txt": "b\n"}}])
+    fakes.script("claude", [AJUSTES])
+    assert run(config_path, repo, "--isolation", "none", "--check", "true", "--max-loops", "2") == 1
+    log = last_run_log(isolated_cache)
+    assert log["status"] == "max_loops" and len(log["steps"]) == 2
+    assert "Limite de 2 ciclos" in log["final_summary"]
 
 
 def test_supervisor_vazio_passa_logo_para_o_reserva(config_path, repo, fakes, isolated_cache) -> None:

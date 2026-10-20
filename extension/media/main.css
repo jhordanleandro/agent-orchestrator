@@ -159,6 +159,7 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--border);
 }
 .notices .warn { font-size: 0.9em; }
+.notices .info { font-size: 0.9em; color: var(--muted); margin: 3px 0; }
 .cycle.setup { border-left-color: var(--warn); }
 .iso-actions { margin: 10px 0 6px; padding-top: 8px; border-top: 1px dashed var(--border); }
 .iso-actions .row { margin-top: 6px; }

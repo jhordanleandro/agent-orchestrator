@@ -792,6 +792,7 @@ class Orchestrator:
         # último: se a revisão aprovar essa mesma árvore, a execução termina.
         self.gate_passed_tree: str | None = None
         self.gate_failed_command: str | None = None
+        self.review_extended = False
         self.forbidden = [re.compile(p, re.IGNORECASE) for p in self.project.get("forbidden_patterns", [])]
         self.abort_on_forbidden = self.project.get("on_forbidden", "warn") == "abort"
         self.abort_event = threading.Event()
@@ -1277,7 +1278,17 @@ class Orchestrator:
             if not ready:
                 return self._finish()
             self.last_tree = snapshot_tree(self.repo)
-            for cycle in range(self.first_cycle, self.last_cycle + 1):
+            # while em vez de range: o limite pode crescer no meio (_extend_for_review).
+            cycle = self.first_cycle - 1
+            while True:
+                cycle += 1
+                if cycle > self.last_cycle:
+                    self.state.status = "max_loops"
+                    self.state.final_summary = (
+                        f"Limite de {self.last_cycle - self.first_cycle + 1} ciclos atingido antes do DONE. "
+                        "Dá para continuar de onde parou (--resume)."
+                    )
+                    break
                 banner(f"Ciclo {cycle}/{self.last_cycle}")
                 emit("cycle_start", cycle=cycle, max=self.last_cycle)
                 if self.control and self.control.stop.is_set():
@@ -1360,17 +1371,28 @@ class Orchestrator:
                     )
                     log("🛑", self.state.final_summary, C.RED)
                     break
-            else:
-                self.state.status = "max_loops"
-                self.state.final_summary = (
-                    f"Limite de {self.max_loops} ciclos atingido antes do DONE. Dá para continuar de onde parou (--resume)."
-                )
+                self._extend_for_review(cycle, step)
         except KeyboardInterrupt:
             self.state.status = "interrupted"
             self.state.final_summary = "Interrompido pelo usuário (Ctrl+C)."
             _print("")
 
         return self._finish()
+
+    def _extend_for_review(self, cycle: int, step: Step) -> None:
+        """Revisão com AJUSTES perto do fim: garante ciclos para corrigir e
+        revisar de novo. Sem isso, com 4 ciclos o fluxo implementar → revisar
+        → corrigir esgotava o limite e o código corrigido saía sem revisão."""
+        wanted = int(self.cfg.get("review_followup_cycles", 2))
+        claude_left = self.claude_policy.get("max_calls_per_run", 2) - self.state.claude_calls
+        remaining = self.last_cycle - cycle
+        if (wanted <= 0 or self.review_extended or step.agent != "claude" or step.code != 0
+                or review_verdict(step.output) != "AJUSTES" or claude_left <= 0 or remaining >= wanted):
+            return
+        self.review_extended = True
+        self.last_cycle += wanted - remaining
+        log("➕", f"Revisão pediu AJUSTES: limite estendido para {self.last_cycle} ciclos (corrigir e revisar de novo).", C.CYAN)
+        emit("cycles_extended", cycle=cycle, max=self.last_cycle, reason="review_ajustes")
 
     def _approved_by_review(self, step: Step) -> bool:
         """Revisão do claude com VEREDITO: APROVADO sobre a árvore em que as

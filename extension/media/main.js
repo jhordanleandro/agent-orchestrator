@@ -401,6 +401,10 @@
       cycleCard(e.cycle);
       setStatus(`Ciclo ${e.cycle}/${e.max}`, "running");
     },
+    cycles_extended(e) {
+      ui.notices.append(h("div", { class: "info" },
+        `➕ A revisão pediu ajustes: limite estendido para ${e.max} ciclos (corrigir e revisar de novo).`));
+    },
     supervisor_start(e) {
       const c = cycleCard(e.cycle);
       c.supStatus.replaceChildren(
