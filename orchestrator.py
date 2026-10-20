@@ -104,6 +104,21 @@ def banner(text: str) -> None:
     _print(f"\n{C.BOLD}{line}\n {text}\n{line}{C.RESET}")
 
 
+def unique_stamp(taken: Callable[[str], bool]) -> str:
+    """Data-hora com milissegundos para nomes de log e de branch.
+
+    Só os segundos colidiam quando duas execuções começavam juntas (a 2ª
+    sobrescrevia o log da 1ª, ou não conseguia criar a branch). O prefixo
+    AAAAMMDD-HHMMSS continua igual: a extensão lê a data por ele.
+    """
+    base = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+    stamp, n = base, 1
+    while taken(stamp):
+        n += 1
+        stamp = f"{base}-{n}"
+    return stamp
+
+
 def preview(text: str, limit: int = 600) -> str:
     text = text.strip()
     if len(text) <= limit:
@@ -1422,7 +1437,10 @@ class Orchestrator:
         if dirty:
             self._warn("Há alterações não commitadas no repositório: a worktree parte do último commit e não as inclui.")
 
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        stamp = unique_stamp(lambda s: (
+            git(["rev-parse", "--verify", "--quiet", f"refs/heads/orch/{s}"], self.source_repo, 30).ok
+            or (WORKTREES_DIR / f"{self.source_repo.name}-{s}").exists()
+        ))
         branch = f"orch/{stamp}"
         path = WORKTREES_DIR / f"{self.source_repo.name}-{stamp}"
         WORKTREES_DIR.mkdir(parents=True, exist_ok=True)
@@ -1503,7 +1521,7 @@ class Orchestrator:
 
     def _finish(self) -> int:
         RUNS_DIR.mkdir(parents=True, exist_ok=True)
-        log_path = RUNS_DIR / f"{datetime.now():%Y%m%d-%H%M%S}.json"
+        log_path = RUNS_DIR / f"{unique_stamp(lambda s: (RUNS_DIR / f'{s}.json').exists())}.json"
         log_path.write_text(json.dumps(asdict(self.state), ensure_ascii=False, indent=2), encoding="utf-8")
         shutil.rmtree(self.workdir, ignore_errors=True)
 

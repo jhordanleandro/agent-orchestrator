@@ -16,6 +16,7 @@ Só biblioteca padrão (Python 3.9+). Todas as flags das CLIs ficam em
 |---|---|
 | `orchestrator.py` | laço supervisor → agente, parser de JSON, filtro pré-claude, logs |
 | `orchestrator.json` | prompts de sistema, comandos de cada CLI, timeouts, limites |
+| `tests/` | testes (pytest) com agentes falsos — não chamam nenhum modelo |
 | `~/.cache/agent-orchestrator/runs/*.json` | log completo de cada execução (prompts e saídas) |
 
 ## Permissões de cada agente (padrão do JSON)
@@ -284,3 +285,21 @@ execução: só `agy mcp disable <nome>`, que é global.
 - **Diagnóstico** (ou o comando *Orquestrador: Diagnóstico do ambiente*): o `--doctor` no painel.
 - **Notificação do sistema** (`notify-send`) quando uma execução termina ou espera
   aprovação com o editor sem foco (`agentOrchestrator.systemNotifications`).
+
+## Testes
+
+```
+python3 -m pytest -q
+```
+
+Rodam em ~10 s sem gastar cota: `tests/fake_agent.py` substitui agy, codex e
+claude e segue um roteiro por teste (saída, arquivos que edita, exit code),
+registrando o que recebeu. Logs e worktrees vão para uma pasta temporária,
+nunca para o `~/.cache` real.
+
+- `test_unit.py`: parser da decisão, veredito, streams das CLIs, `.orchestrator.json`,
+  `run_command` (timeout mata o grupo, abort) e git (retratos, aceitar com e sem conflito).
+- `test_run.py`: execuções completas via `main()` — fim automático após APROVADO,
+  AJUSTES até o limite, supervisor reserva, filtro barrando o claude, padrão proibido,
+  flags de MCP do codex, worktree + aceitar, retomada, aprovação/recusa e Node do projeto
+  (pulado se o `fnm` não tiver o Node 24).

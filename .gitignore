@@ -1,6 +1,7 @@
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Extensão: dependências, build e pacotes (gerados por npm install / tsc / vsce)
 extension/node_modules/
