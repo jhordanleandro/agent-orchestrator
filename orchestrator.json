@@ -157,6 +157,7 @@
             "$schema": "https://opencode.ai/config.json",
             "share": "disabled",
             "autoupdate": false,
+            "small_model": "openrouter/qwen/qwen3-coder",
             "permission": {
               "edit": "allow",
               "webfetch": "deny",
@@ -211,5 +212,5 @@
   "_supervisor_fallback": "Reserva do supervisor. O agy fica aqui (e não como principal) porque o backend do Gemini às vezes para a resposta por 5 min antes de tentar de novo; timeout próprio para não segurar o ciclo.",
   "supervisor_retries": 0,
   "_supervisor_retries": "Novas tentativas do supervisor principal antes de passar ao reserva (0 = reserva já na 1ª falha).",
-  "_opencode": "Agente opcional via OpenRouter: chave OPENROUTER_API_KEY em ~/.config/agent-orchestrator/secrets.env. Troque o modelo no -m (ex.: openrouter/moonshotai/kimi-k2.7-code). As permissões do opencode vêm de config_file, gerado a cada execução: edição liberada, rede e pastas fora do projeto bloqueadas."
+  "_opencode": "Agente opcional via OpenRouter: chave OPENROUTER_API_KEY em ~/.config/agent-orchestrator/secrets.env. Troque o modelo no -m (ex.: openrouter/moonshotai/kimi-k2.7-code). As permissões do opencode vêm de config_file, gerado a cada execução: edição liberada, rede e pastas fora do projeto bloqueadas. small_model = o mesmo modelo: o padrão do opencode para títulos de sessão era um modelo de imagem, que exige saldo mínimo de US$ 1."
 }

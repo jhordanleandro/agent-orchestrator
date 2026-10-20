@@ -550,6 +550,9 @@ class StreamParser:
             err = e.get("error") or {}
             message = str((err.get("data") or {}).get("message") or err.get("name") or err)
             out.append(Activity("warning", f"opencode: {message[:300]}"))
+            # Sem isso o passo terminava com saída vazia e ninguém via o motivo
+            # (ex.: falta de crédito no OpenRouter).
+            self.messages.append(f"[erro do opencode] {message}")
         return out
 
 

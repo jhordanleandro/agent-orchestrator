@@ -50,7 +50,15 @@ def test_stream_do_opencode(tmp_path: Path) -> None:
     assert acts[1].data["exit_code"] == 1 and acts[1].data["tail"].endswith("FALHOU")
     assert acts[2].text.startswith("❌ git push")
     assert acts[-1].kind == "warning" and "sem crédito" in acts[-1].text
-    assert p.text() == "Pronto." and p.tokens == 120 and p.cost_usd == 0.002 and p.denied == ["bash"]
+    assert p.tokens == 120 and p.cost_usd == 0.002 and p.denied == ["bash"]
+    assert p.text() == "Pronto."
+
+
+def test_erro_do_opencode_vira_a_saida_do_passo(tmp_path: Path) -> None:
+    """Teste real (20/10): sem crédito, o passo saía vazio e ninguém via o motivo."""
+    p = orch.StreamParser("opencode-json", tmp_path)
+    p.feed(json.dumps({"type": "error", "error": {"name": "APIError", "data": {"message": "requires more credits"}}}))
+    assert "requires more credits" in p.text()
 
 
 def test_opencode_recebe_chave_permissoes_e_prompt_anexado(config_path, repo, fakes, isolated_cache, tmp_path) -> None:
@@ -88,6 +96,9 @@ def test_permissoes_geradas_bloqueiam_rede_push_e_pastas_externas() -> None:
     assert perm["webfetch"] == "deny" and perm["external_directory"] == "deny"
     assert perm["bash"]["git push*"] == "deny" and perm["bash"]["curl *"] == "deny"
     assert spec["direct"]["config_file"]["content"]["share"] == "disabled"
+    # Títulos de sessão com o mesmo modelo (o padrão era um modelo de imagem).
+    model = spec["direct"]["cmd"][spec["direct"]["cmd"].index("-m") + 1]
+    assert spec["direct"]["config_file"]["content"]["small_model"] == model
     assert "--auto" not in spec["direct"]["cmd"]
 
 
