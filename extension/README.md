@@ -1,7 +1,7 @@
 # Orquestrador de Agentes (extensão)
 
-Painel para o `orchestrator.py`: agy supervisiona, codex implementa e claude
-revisa, com cada ciclo, decisão, verificação e saída dos agentes ao vivo.
+Painel para o `orchestrator.py`: codex supervisiona, codex e agy implementam e
+claude revisa, com cada ciclo, decisão, verificação e saída dos agentes ao vivo.
 
 Abra pelo ícone **Orquestrador** na barra lateral, ou pelo comando
 **Orquestrador: Executar tarefa…**. Configurações em `agentOrchestrator.*`
