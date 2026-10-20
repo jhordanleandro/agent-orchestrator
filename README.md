@@ -53,6 +53,7 @@ repositório e sua árvore de trabalho não são tocados.
 ```json
 {
   "isolation": "worktree",
+  "node": "24",
   "max_loops": 6,
   "setup": ["pnpm install --frozen-lockfile --prefer-offline"],
   "checks": ["pnpm typecheck", "pnpm lint", "pnpm test"],
@@ -69,6 +70,7 @@ repositório e sua árvore de trabalho não são tocados.
 | `setup` | comandos rodados na worktree nova, antes do 1º ciclo (falhou → para) |
 | `checks` | somados ao `--check`; precisam passar antes do claude |
 | `env` | variáveis para agentes, setup e checks; `null` remove a variável |
+| `node` | versão do Node (via `fnm`) posta na frente do PATH de agentes, setup e checks; o `--doctor` confere |
 | `copy_files` | arquivos copiados do repositório para a worktree (cuidado com segredos) |
 | `rules` | texto obrigatório em todos os prompts |
 | `forbidden_patterns` | regex procuradas na saída dos agentes; `on_forbidden`: `warn` ou `abort` |
@@ -250,10 +252,29 @@ arquivo muda ou quando você troca de projeto no editor.
 
 ## Supervisor reserva
 
-Se o supervisor principal (agy) devolver resposta sem JSON nas duas tentativas — o
-caso típico é ele tentar um comando, que é negado em modo não interativo —, o
-`supervisor_fallback` (padrão: `codex exec -s read-only`) decide aquele ciclo em vez
-de abortar. Aparece como aviso no log e no painel. Remova a chave para desligar.
+Se o supervisor principal (agy) devolver resposta sem JSON — o caso típico é ele
+tentar um comando (`git status`), que é negado em modo não interativo —, o
+`supervisor_fallback` (padrão: `codex exec -s read-only`) decide aquele ciclo já na
+1ª falha. `supervisor_retries` (padrão 0) dá novas chances ao principal antes disso.
+Para o agy não precisar de comandos, o prompt dele já leva `git status --short`,
+`git diff --stat` e se as verificações passaram no código atual. Remova
+`supervisor_fallback` para desligar o reserva.
+
+## Fim automático após a revisão
+
+O claude termina a revisão com `VEREDITO: APROVADO` ou `VEREDITO: AJUSTES`
+(apontamentos fora do escopo vão numa seção à parte e não impedem o APROVADO). Se
+for APROVADO **e** o código é o mesmo em que as `checks` acabaram de passar, a
+execução termina ali, sem perguntar ao supervisor — antes ele às vezes mandava o
+codex "validar tudo de novo" num ciclo inteiro a mais.
+
+## MCP globais desligados nos agentes
+
+MCP configurados globalmente (ex.: os da Hostinger) deixam cada chamada lenta e dão
+ao agente acesso à produção. No codex, o item `"{codex_mcp_off}"` do comando vira
+um `-c mcp_servers.<nome>.enabled=false` por servidor, só naquela execução; o
+claude roda com `--strict-mcp-config` (nenhum MCP). O agy não tem opção por
+execução: só `agy mcp disable <nome>`, que é global.
 
 ## Na extensão: fila, diagnóstico e notificações
 

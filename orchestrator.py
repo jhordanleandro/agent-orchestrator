@@ -542,6 +542,7 @@ def load_project_config(root: Path) -> tuple[dict[str, Any], Path | None]:
         "checks": list, "rules": str, "env": dict, "forbidden_patterns": list,
         "on_forbidden": str, "isolation": str, "copy_files": list, "setup": list, "max_loops": int,
         "templates": list,  # usado só pela extensão (modelos de tarefa do projeto)
+        "node": str,  # versão do Node dos agentes e verificações (resolvida via fnm)
     }
     for key, kind in expected.items():
         if key in data and not isinstance(data[key], kind):
@@ -555,6 +556,42 @@ def load_project_config(root: Path) -> tuple[dict[str, Any], Path | None]:
         except re.error as exc:
             sys.exit(f"{path}: padrão proibido inválido {pattern!r}: {exc}")
     return data, path
+
+
+def resolve_node_bin(version: str) -> tuple[Path | None, str]:
+    """Pasta bin do Node pedido no projeto (via fnm). Retorna (pasta, erro)."""
+    if not shutil.which("fnm"):
+        return None, "fnm não encontrado no PATH"
+    res = subprocess.run(
+        ["fnm", "exec", f"--using={version}", "node", "-p",
+         "require('path').dirname(process.execPath) + '|' + process.version"],
+        capture_output=True, text=True, timeout=60,
+    )
+    if res.returncode != 0 or "|" not in res.stdout:
+        return None, (res.stderr or res.stdout).strip()[:300] or f"fnm não tem o Node {version}"
+    bin_dir, _ = res.stdout.strip().rsplit("|", 1)
+    return Path(bin_dir), ""
+
+
+def codex_mcp_servers() -> list[str]:
+    """Nomes dos servidores MCP configurados no codex (para desligá-los por execução)."""
+    if not shutil.which("codex"):
+        return []
+    try:
+        res = subprocess.run(["codex", "mcp", "list", "--json"], capture_output=True, text=True, timeout=60)
+        data = json.loads(res.stdout or "[]")
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return []
+    return [str(item["name"]) for item in data if isinstance(item, dict) and item.get("name")]
+
+
+REVIEW_VERDICT_RE = re.compile(r"VEREDITO\s*:\s*\**\s*(APROVADO|AJUSTES)", re.IGNORECASE)
+
+
+def review_verdict(output: str) -> str | None:
+    """Último veredito (APROVADO/AJUSTES) que o claude escreveu na revisão."""
+    found = REVIEW_VERDICT_RE.findall(output or "")
+    return found[-1].upper() if found else None
 
 
 def snapshot_tree(repo: Path) -> str | None:
@@ -725,6 +762,19 @@ class Orchestrator:
                 self.env.pop(key, None)
             else:
                 self.env[key] = str(value)
+        self.node_note = ""
+        node_version = self.project.get("node")
+        if node_version:
+            bin_dir, err = resolve_node_bin(node_version)
+            if bin_dir:
+                self.env["PATH"] = f"{bin_dir}{os.pathsep}{self.env.get('PATH', '')}"
+                self.node_note = f"Node {node_version} ({bin_dir})"
+            else:
+                self.node_note = f"Node {node_version} pedido no projeto, mas não resolvido: {err}"
+        self._codex_mcp_off: list[str] | None = None
+        # Árvore git em que as verificações do filtro pré-claude passaram por
+        # último: se a revisão aprovar essa mesma árvore, a execução termina.
+        self.gate_passed_tree: str | None = None
         self.forbidden = [re.compile(p, re.IGNORECASE) for p in self.project.get("forbidden_patterns", [])]
         self.abort_on_forbidden = self.project.get("on_forbidden", "warn") == "abort"
         self.abort_event = threading.Event()
@@ -843,7 +893,12 @@ class Orchestrator:
             "{last_message_file}": str(last_msg),
             "{timeout}": str(timeout),
         }
-        cmd = [self._fill(part, values) for part in direct["cmd"]]
+        cmd: list[str] = []
+        for part in direct["cmd"]:
+            if part == "{codex_mcp_off}":
+                cmd.extend(self._codex_mcp_flags())
+            else:
+                cmd.append(self._fill(part, values))
         parser = StreamParser(direct["stream_format"], self.repo) if direct.get("stream_format") else None
         if parser:
             on_line = self._parsing_line_handler(parser, on_line, agent or label, cycle)
@@ -900,6 +955,15 @@ class Orchestrator:
         if parser.denied:
             self._warn(f"{agent}: ações negadas em modo não interativo ({', '.join(sorted(set(parser.denied)))}).")
 
+    def _codex_mcp_flags(self) -> list[str]:
+        """-c que desligam, só nesta execução, os MCP globais do codex (ex.: os
+        da Hostinger): deixam cada chamada lenta e dariam acesso à produção."""
+        if self._codex_mcp_off is None:
+            self._codex_mcp_off = []
+            for name in codex_mcp_servers():
+                self._codex_mcp_off += ["-c", f"mcp_servers.{name}.enabled=false"]
+        return self._codex_mcp_off
+
     @staticmethod
     def _fill(template: str, values: dict[str, str]) -> str:
         # str.replace em vez de str.format: prompts têm chaves de JSON e código.
@@ -947,6 +1011,25 @@ class Orchestrator:
         more = f" e mais {len(step.files) - 25}" if len(step.files) > 25 else ""
         return f"Arquivos alterados neste passo: {names}{more}\n"
 
+    def _repo_state_block(self) -> str:
+        """git status e diff --stat já prontos: o supervisor não consegue rodar
+        comandos e, quando tenta, volta sem resposta."""
+        status = run_command(["git", "status", "--short"], self.repo, 30)
+        if status.code != 0:
+            return ""
+        stat = run_command(["git", "diff", "--stat", "HEAD"], self.repo, 30)
+        gate = ""
+        if self.gate_passed_tree:
+            fresh = self.gate_passed_tree == snapshot_tree(self.repo)
+            checks = ", ".join(self.gate_cfg.get("commands", [])) or "nenhuma"
+            gate = (f"Verificações locais ({checks}): PASSARAM "
+                    + ("no estado atual do código.\n" if fresh else "antes das últimas alterações.\n"))
+        return (
+            "## Estado atual do repositório (já coletado — não rode comandos)\n"
+            f"git status --short:\n{clip(status.stdout.strip() or '(sem alterações)', 3000)}\n"
+            f"git diff --stat HEAD:\n{clip(stat.stdout.strip() or '(vazio)', 2000)}\n{gate}\n"
+        )
+
     def _ask_supervisor(self, cycle: int) -> dict[str, Any] | None:
         sup = self.cfg["supervisor"]
         remaining = self.last_cycle - cycle + 1
@@ -956,13 +1039,19 @@ class Orchestrator:
             f"## Tarefa do usuário\n{self.state.task}\n\n"
             f"{self._rules_block()}{self._notes_block()}"
             f"## Repositório\n{self.repo}\n\n"
+            f"{self._repo_state_block()}"
             f"## Orçamento\nCiclos restantes (incluindo este): {remaining}. "
             f"Chamadas restantes ao claude: {max(0, claude_left)}.\n"
             f"Se restar só 1 ciclo, priorize deixar o código funcionando ou encerre com DONE.\n\n"
             f"## Histórico\n{self._history_text()}\n\n"
             "Responda agora APENAS com o JSON de decisão."
         )
-        for attempt in (1, 2):
+        # Com reserva configurado, uma falha do principal já passa para ele: o
+        # agy falha quase sempre pelo mesmo motivo (tentou rodar um comando,
+        # negado no modo headless), então repetir só gastava mais 5 minutos.
+        has_fallback = bool(self.cfg.get("supervisor_fallback")) and self.backend == "direct"
+        retries = int(self.cfg.get("supervisor_retries", 0 if has_fallback else 1))
+        for attempt in range(1, 2 + retries):
             log("🧭", f"Supervisor ({sup['agent']}) decidindo o próximo passo… (tentativa {attempt})", C.CYAN)
             emit("supervisor_start", cycle=cycle, attempt=attempt, agent=sup["agent"])
             res = self._invoke(
@@ -976,7 +1065,8 @@ class Orchestrator:
             log("⚠️ ", f"Resposta do supervisor sem JSON válido (exit {res.code}): {preview(res.stdout or res.stderr, 300)}", C.YELLOW)
             emit("supervisor_invalid", cycle=cycle, attempt=attempt, code=res.code,
                  preview=clip(res.stdout or res.stderr, 1000))
-            prompt += "\n\nATENÇÃO: sua resposta anterior não continha o JSON. Responda SOMENTE com o objeto JSON."
+            if "ATENÇÃO: sua resposta anterior" not in prompt:
+                prompt += "\n\nATENÇÃO: sua resposta anterior não continha o JSON. Responda SOMENTE com o objeto JSON."
 
         # O agy às vezes volta vazio (ex.: tentou rodar um comando, que é negado em
         # modo não interativo). Em vez de abortar, um supervisor reserva decide.
@@ -1047,6 +1137,8 @@ class Orchestrator:
             if not res.ok:
                 return False, "codex", f"A verificação local `{command}` falhou (exit {res.code}):\n{output}"
             log("✅", f"Passou: {command} ({res.seconds:.0f}s)", C.GREEN)
+        if self.gate_cfg.get("commands"):
+            self.gate_passed_tree = snapshot_tree(self.repo)
         return True, "", ""
 
     # — passos —
@@ -1145,6 +1237,10 @@ class Orchestrator:
 
         if self.control:
             self.control.start()
+        if self.node_note.startswith("Node") and "não resolvido" in self.node_note:
+            self._warn(self.node_note)
+        elif self.node_note:
+            log("🟢", f"Usando {self.node_note}", C.DIM)
         try:
             ready = self._resume_workspace() if self.state.isolation else self._prepare_workspace()
             if not ready:
@@ -1212,6 +1308,16 @@ class Orchestrator:
 
                 step = self._run_worker(cycle, agent, decision["reason"], decision["prompt"], redirected_from)
                 self.state.steps.append(step)
+                if self._approved_by_review(step):
+                    self.state.status = "done"
+                    self.state.final_summary = (
+                        "Revisão do claude: APROVADO, sobre o mesmo código em que "
+                        f"{', '.join(self.gate_cfg['commands'])} passaram.\n\n{clip(step.output, 3000)}"
+                    )
+                    log("🏁", "Revisão aprovada com as verificações em dia — encerrando sem novo ciclo.", C.GREEN)
+                    emit("decision", cycle=cycle, next_agent="DONE", reason="Revisão do claude aprovada",
+                         claude_purpose=None, prompt="", summary=self.state.final_summary, auto=True)
+                    break
                 if self.abort_event.is_set():
                     self.state.status = "blocked"
                     self.state.final_summary = (
@@ -1231,6 +1337,17 @@ class Orchestrator:
             _print("")
 
         return self._finish()
+
+    def _approved_by_review(self, step: Step) -> bool:
+        """Revisão do claude com VEREDITO: APROVADO sobre a árvore em que as
+        verificações passaram — sem isso o supervisor mandava alguém
+        "validar tudo de novo" num ciclo inteiro a mais."""
+        return (
+            step.agent == "claude" and step.code == 0
+            and self.gate_passed_tree is not None
+            and step.tree_after == self.gate_passed_tree
+            and review_verdict(step.output) == "APROVADO"
+        )
 
     def _needs_approval(self) -> bool:
         if self.approve_mode == "all":
@@ -1478,6 +1595,11 @@ def doctor(config: dict[str, Any], repo: Path, backend: str) -> list[dict[str, A
                           f"isolamento {project.get('isolation', config.get('isolation', 'worktree'))}")
                 add("Configuração do projeto", not missing, detail,
                     f"Comandos não encontrados no PATH: {', '.join(missing)}" if missing else "")
+                if project.get("node"):
+                    bin_dir, err = resolve_node_bin(project["node"])
+                    add(f"Node {project['node']} (projeto)", bin_dir is not None,
+                        str(bin_dir) if bin_dir else err,
+                        "" if bin_dir else f"Instale com: fnm install {project['node']}")
             else:
                 add("Configuração do projeto", None, "sem .orchestrator.json",
                     "Opcional: defina verificações, variáveis bloqueadas e modelos para este projeto.")
