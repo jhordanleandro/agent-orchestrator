@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Orquestrador de agentes de código via CLI (agy → codex → claude).
+"""Orquestrador de agentes de código via CLI (agy, codex e claude).
 
 Recebe uma instrução em linguagem natural e alterna automaticamente entre
 três CLIs já autenticadas, sem API paga:
 
-- agy    (Gemini): supervisor de cada ciclo + arquitetura/frontend.
-- codex  (OpenAI): backend, lógica de negócio e testes.
+- codex  (OpenAI): supervisor de cada ciclo (só leitura) + backend e testes.
+- agy    (Gemini): arquitetura/frontend e supervisor reserva.
 - claude (Claude): só revisão final ou diagnóstico de bug insolúvel,
                    sempre atrás de um filtro de qualidade local.
 
@@ -1061,9 +1061,9 @@ class Orchestrator:
             f"## Histórico\n{self._history_text()}\n\n"
             "Responda agora APENAS com o JSON de decisão."
         )
-        # Com reserva configurado, uma falha do principal já passa para ele: o
-        # agy falha quase sempre pelo mesmo motivo (tentou rodar um comando,
-        # negado no modo headless), então repetir só gastava mais 5 minutos.
+        # Com reserva configurado, uma falha do principal já passa para ele:
+        # repetir o mesmo supervisor costuma falhar pelo mesmo motivo e só
+        # gastava mais um tempo-limite inteiro.
         has_fallback = bool(self.cfg.get("supervisor_fallback")) and self.backend == "direct"
         retries = int(self.cfg.get("supervisor_retries", 0 if has_fallback else 1))
         for attempt in range(1, 2 + retries):
@@ -1083,14 +1083,15 @@ class Orchestrator:
             if "ATENÇÃO: sua resposta anterior" not in prompt:
                 prompt += "\n\nATENÇÃO: sua resposta anterior não continha o JSON. Responda SOMENTE com o objeto JSON."
 
-        # O agy às vezes volta vazio (ex.: tentou rodar um comando, que é negado em
-        # modo não interativo). Em vez de abortar, um supervisor reserva decide.
+        # Em vez de abortar, um supervisor reserva decide. O reserva tem timeout
+        # próprio: o agy às vezes fica 5 min parado esperando o backend do Gemini.
         fallback = self.cfg.get("supervisor_fallback")
         if fallback and self.backend == "direct":
             self._warn(f"Supervisor principal sem resposta válida no ciclo {cycle}; usando o reserva ({fallback.get('agent', '?')}).")
             emit("supervisor_start", cycle=cycle, attempt=3, agent=fallback.get("agent", "reserva"), fallback=True)
+            timeout = int(fallback.get("timeout") or self.timeouts.get("supervisor", 300))
             res = self._invoke(
-                fallback, prompt, self.timeouts.get("supervisor", 300), f"c{cycle}-supervisor-fallback",
+                fallback, prompt, timeout, f"c{cycle}-supervisor-fallback",
                 on_line=self._streamer(cycle, "supervisor"), agent="supervisor", cycle=cycle,
             )
             self.state.count("supervisor", res.seconds)
@@ -1181,7 +1182,18 @@ class Orchestrator:
             )
         return (
             f"{role}\n\n{self._rules_block()}{self._notes_block()}## Objetivo geral do usuário\n{self.state.task}\n\n"
-            f"## Sua tarefa agora\n{instruction}{context}"
+            f"## Sua tarefa agora\n{instruction}{context}{self._checks_done_block(agent)}"
+        )
+
+    def _checks_done_block(self, agent: str) -> str:
+        """Diz ao claude que as verificações já passaram: ele não pode rodá-las
+        (só git é liberado) e perdia tempo tentando."""
+        commands = self.gate_cfg.get("commands", [])
+        if agent != "claude" or not commands or self.gate_passed_tree is None:
+            return ""
+        return (
+            f"\n\n## Verificações já feitas\nO orquestrador acabou de rodar {', '.join(commands)} "
+            "neste mesmo código e todas passaram. Não tente rodá-las de novo: revise lendo o código e o diff."
         )
 
     def _run_worker(self, cycle: int, agent: str, reason: str, instruction: str, redirected_from: str | None) -> Step:
@@ -1580,7 +1592,7 @@ def doctor(config: dict[str, Any], repo: Path, backend: str) -> list[dict[str, A
     if backend == "mco":
         binaries["mco"] = "mco"
     else:
-        binaries[f"supervisor ({config['supervisor'].get('agent', 'agy')})"] = config["supervisor"]["direct"]["cmd"][0]
+        binaries[f"supervisor ({config['supervisor'].get('agent', '?')})"] = config["supervisor"]["direct"]["cmd"][0]
         for name, spec in config["agents"].items():
             binaries[name] = spec["direct"]["cmd"][0]
         fb = config.get("supervisor_fallback")
@@ -1680,7 +1692,7 @@ def check_binaries(config: dict[str, Any], backend: str) -> list[str]:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Orquestra agy (supervisor/frontend), codex (backend/testes) e claude (revisão).",
+        description="Orquestra codex (supervisor/backend/testes), agy (frontend) e claude (revisão).",
     )
     p.add_argument("task", nargs="?", help="instrução em linguagem natural")
     p.add_argument("--repo", default=os.getcwd(), help="repositório de trabalho (padrão: pasta atual)")

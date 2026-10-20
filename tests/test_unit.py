@@ -188,6 +188,10 @@ def test_config_padrao_tem_os_campos_que_o_codigo_usa() -> None:
     assert set(cfg["agents"]) == set(orch.WORKERS)
     assert "VEREDITO" in cfg["agents"]["claude"]["role"]
     assert "{codex_mcp_off}" in cfg["agents"]["codex"]["direct"]["cmd"]
+    # codex decide em segundos; o agy (reserva) às vezes trava 5 min no backend.
+    assert cfg["supervisor"]["agent"] == "codex" and "read-only" in cfg["supervisor"]["direct"]["cmd"]
+    assert cfg["supervisor_fallback"]["agent"] == "agy"
+    assert cfg["supervisor_fallback"]["timeout"] < cfg["timeouts"]["supervisor"]
 
 
 # ─── Execução de comandos ────────────────────────────────────────────────────

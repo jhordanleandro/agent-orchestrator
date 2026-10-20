@@ -1,7 +1,8 @@
 # agent-orchestrator
 
-Uma instrução em linguagem natural → `agy` supervisiona e delega → `codex`
-implementa backend/testes → `claude` só revisa no fim, atrás de um filtro local.
+Uma instrução em linguagem natural → `codex` (só leitura) supervisiona e delega →
+`codex`/`agy` implementam backend/testes e frontend → `claude` só revisa no fim,
+atrás de um filtro local.
 
 ```
 python3 orchestrator.py "Minha necessidade técnica aqui"
@@ -23,7 +24,8 @@ Só biblioteca padrão (Python 3.9+). Todas as flags das CLIs ficam em
 
 | Papel | Comando | Pode alterar arquivos? |
 |---|---|---|
-| supervisor | `agy --mode plan -p …` | não (só lê e decide) |
+| supervisor | `codex exec -s read-only -C <repo> -` | não (só lê e decide) |
+| supervisor reserva | `agy --mode plan -p …` (timeout 180 s) | não |
 | agy (frontend) | `agy --mode accept-edits -p …` | sim, edições |
 | codex (backend) | `codex exec -s workspace-write -C <repo> -` | sim, só dentro do repo (sandbox) |
 | claude (revisão) | `claude -p --allowedTools Read,Grep,Glob,Bash(git diff:*)…` | não |
@@ -180,7 +182,8 @@ execução junto com os subprocessos dele).
 
 ## Limitações conhecidas
 
-- Cada ciclo custa **duas** chamadas: supervisor (agy) + agente. O agy tem cota alta, por isso o desenho.
+- Cada ciclo custa **duas** chamadas: supervisor + agente. O supervisor é barato (só leitura,
+  prompt curto: ~25 mil tokens por decisão), bem menos que um passo de implementação.
 - O agente não vê o histórico inteiro: recebe o prompt do supervisor, o objetivo geral e o fim da saída do passo anterior.
 - O `agy` só aceita o prompt como argumento. Acima de `arg_prompt_limit_chars`, o prompt vai para um arquivo e o agente recebe a instrução de lê-lo.
 - As saídas do `mco run --quiet` dependem da versão do mco; se o parser não achar o JSON do supervisor, teste com `--backend direct`.
@@ -253,13 +256,17 @@ arquivo muda ou quando você troca de projeto no editor.
 
 ## Supervisor reserva
 
-Se o supervisor principal (agy) devolver resposta sem JSON — o caso típico é ele
-tentar um comando (`git status`), que é negado em modo não interativo —, o
-`supervisor_fallback` (padrão: `codex exec -s read-only`) decide aquele ciclo já na
-1ª falha. `supervisor_retries` (padrão 0) dá novas chances ao principal antes disso.
-Para o agy não precisar de comandos, o prompt dele já leva `git status --short`,
-`git diff --stat` e se as verificações passaram no código atual. Remova
-`supervisor_fallback` para desligar o reserva.
+Se o supervisor principal (codex) devolver resposta sem JSON, o `supervisor_fallback`
+(padrão: `agy --mode plan`) decide aquele ciclo já na 1ª falha, com tempo-limite
+próprio (`timeout`, padrão 180 s). `supervisor_retries` (padrão 0) dá novas chances
+ao principal antes disso. Remova `supervisor_fallback` para desligar o reserva.
+
+Os papéis eram o contrário até 20/10/2026. Na 2ª execução real o agy levou ~5 min
+por decisão (e 501 s para responder "ok" fora do orquestrador): o log dele mostra
+`stream idle timeout (5m0s)` — o backend do Gemini para a resposta e o agy só tenta
+de novo depois de 5 min. O codex decidiu o mesmo ciclo em 11 s. O prompt do
+supervisor já leva `git status --short`, `git diff --stat` e se as verificações
+passaram no código atual, então nenhum dos dois precisa rodar comandos.
 
 ## Fim automático após a revisão
 

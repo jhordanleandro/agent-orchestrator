@@ -30,6 +30,9 @@ def test_fluxo_feliz_termina_sozinho_apos_aprovado(config_path, repo, fakes, iso
     assert "APROVADO" in log["final_summary"]
     # Sem um 3º ciclo do supervisor só para "validar tudo de novo".
     assert len(fakes.calls("supervisor")) == 2
+    # O claude fica sabendo que as verificações já passaram e não tenta rodá-las.
+    assert "Verificações já feitas" in fakes.calls("claude")[0]["stdin"]
+    assert "Verificações já feitas" not in fakes.calls("codex")[0]["stdin"]
     auto = [e for e in events() if e["type"] == "decision" and e.get("auto")]
     assert auto and auto[0]["next_agent"] == "DONE"
     # O passo do codex registra o arquivo que ele alterou.
@@ -67,6 +70,18 @@ def test_supervisor_vazio_passa_logo_para_o_reserva(config_path, repo, fakes, is
     assert any("reserva" in w for w in log["warnings"])
     # O reserva recebe o mesmo prompt, com o aviso de que faltou o JSON.
     assert "ATENÇÃO: sua resposta anterior" in fakes.calls("fallback")[0]["stdin"]
+
+
+def test_reserva_respeita_o_proprio_tempo_limite(config_path, repo, fakes, isolated_cache) -> None:
+    cfg = json.loads(config_path.read_text())
+    cfg["supervisor_fallback"]["timeout"] = 1
+    config_path.write_text(json.dumps(cfg))
+    fakes.script("supervisor", [{"out": ""}])
+    fakes.script("fallback", [{"sleep": 30}])
+    assert run(config_path, repo, "--isolation", "none") == 1
+    log = last_run_log(isolated_cache)
+    assert log["status"] == "aborted"
+    assert log["stats"]["supervisor"]["seconds"] < 15
 
 
 def test_sem_decisao_nem_do_reserva_aborta(config_path, repo, fakes, isolated_cache) -> None:
