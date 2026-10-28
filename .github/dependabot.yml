@@ -1,0 +1,29 @@
+# Atualizações automáticas: uma vez por mês, com as versões menores agrupadas num só PR.
+# O orquestrador em Python só usa a biblioteca padrão, então não entra aqui.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /extension
+    schedule:
+      interval: monthly
+    groups:
+      dependencias:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # Precisa acompanhar o "engines.vscode" do package.json, senão o vsce recusa o empacotamento
+      - dependency-name: "@types/vscode"
+    commit-message:
+      prefix: chore
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+      include: scope
