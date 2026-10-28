@@ -378,3 +378,7 @@ nunca para o `~/.cache` real.
   AJUSTES até o limite, supervisor reserva, filtro barrando o claude, padrão proibido,
   flags de MCP do codex, worktree + aceitar, retomada, aprovação/recusa e Node do projeto
   (pulado se o `fnm` não tiver o Node 24).
+
+## Licença
+
+Distribuído sob a [licença MIT](LICENSE).
