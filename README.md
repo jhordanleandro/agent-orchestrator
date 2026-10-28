@@ -1,5 +1,7 @@
 # agent-orchestrator
 
+[![Testes](https://github.com/jhordanleandro/agent-orchestrator/actions/workflows/tests.yml/badge.svg)](https://github.com/jhordanleandro/agent-orchestrator/actions/workflows/tests.yml)
+
 Uma instrução em linguagem natural → `codex` (só leitura) supervisiona e delega →
 `codex` implementa frontend, backend e testes (o `agy` só quando você pedir) →
 `claude` só revisa no fim, atrás de um filtro local.
