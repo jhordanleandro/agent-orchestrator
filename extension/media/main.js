@@ -629,7 +629,8 @@
   }
 
   function apply(event) {
-    const fn = handlers[event.type];
+    // Só despacha para os handlers declarados (ignora tipos como "constructor")
+    const fn = Object.hasOwn(handlers, event.type) ? handlers[event.type] : undefined;
     if (fn) fn(event);
   }
 

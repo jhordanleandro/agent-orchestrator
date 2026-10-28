@@ -27,6 +27,8 @@ A versão é a da extensão (`extension/package.json`); o `orchestrator.py` anda
   duas vezes (o Gemini levava 2–4 min por resposta) e o codex fez tudo em menos de 5.
 
 ### Corrigido
+- O painel só despacha eventos de tipos conhecidos: um `type` como `constructor`
+  vindo do processo não chama mais um método herdado do objeto.
 - O `.gitignore` do `--init` cobre saídas de build (`.next/`, `dist/`, `*.tsbuildinfo`…).
 - O supervisor podia encerrar dizendo que o claude aprovou quando o VEREDITO
   tinha sido escrito pelo codex (3ª execução real, `claude_calls` = 0). O resumo
